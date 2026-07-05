@@ -1,0 +1,40 @@
+---
+title: EU SME definition (Commission Recommendation 2003/361/EC)
+source_url: https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32003H0361
+source_type: eur-lex
+language: en
+---
+Commission Recommendation 2003/361/EC defines micro, small and medium-sized
+enterprises (SMEs) for the purposes of EU law and funding programmes. The
+category an enterprise falls into determines eligibility for most EU and
+national SME support schemes.
+
+The category of micro, small and medium-sized enterprises is made up of
+enterprises which employ fewer than 250 persons and which have an annual
+turnover not exceeding EUR 50 million, and/or an annual balance sheet total
+not exceeding EUR 43 million.
+
+Within the SME category, a small enterprise is defined as an enterprise which
+employs fewer than 50 persons and whose annual turnover and/or annual balance
+sheet total does not exceed EUR 10 million.
+
+Within the SME category, a microenterprise is defined as an enterprise which
+employs fewer than 10 persons and whose annual turnover and/or annual balance
+sheet total does not exceed EUR 2 million.
+
+Staff headcount is expressed in annual work units (AWU): anyone who worked
+full-time within the enterprise, or on its behalf, during the entire reference
+year counts as one unit; part-time staff, seasonal workers and those who did
+not work the full year count as fractions of a unit.
+
+An enterprise's status also depends on its relationships with other
+enterprises. An autonomous enterprise holds less than 25% of the capital or
+voting rights of another enterprise and vice versa. Partner enterprises
+(holdings of 25% to 50%) and linked enterprises (control, typically over 50%)
+must add a proportion of, or all of, the other enterprise's headcount and
+financials to their own when checking the thresholds. This prevents large
+groups from accessing SME support through small subsidiaries.
+
+An enterprise that exceeds or falls below the thresholds only changes SME
+status if this happens over two consecutive accounting periods, which protects
+growing companies from abruptly losing SME benefits in a single good year.

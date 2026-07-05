@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EURAG — EU SME Intelligence Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400;1,9..144,600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #f5efe3;
+    --paper-deep: #efe6d3;
+    --card: #fbf7ee;
+    --ink: #22283a;
+    --ink-soft: #4c5165;
+    --muted: #837a64;
+    --navy: #1c3f8f;
+    --navy-deep: #14306e;
+    --gold: #b8860b;
+    --gold-bright: #e8b931;
+    --rule: #d9cdb2;
+    --rule-strong: #b9a97f;
+    --amber-bg: #f6e7c6;
+    --amber-ink: #7a5a12;
+    --red-ink: #8c2f2f;
+    --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --display: "Fraunces", Georgia, serif;
+    --mono: "IBM Plex Mono", "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; min-height: 100vh;
+    color: var(--ink);
+    font: 17px/1.65 var(--serif);
+    background:
+      radial-gradient(1200px 500px at 50% -180px, rgba(184,134,11,.10), transparent 65%),
+      linear-gradient(var(--paper), var(--paper));
+    background-color: var(--paper);
+  }
+  /* paper grain */
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    opacity: .5; mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.72 0 0 0 0 0.66 0 0 0 0 0.52 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  header {
+    position: relative; z-index: 1;
+    max-width: 780px; margin: 0 auto; padding: 34px 20px 18px;
+  }
+  .masthead-rule { border-top: 3px double var(--rule-strong); margin-bottom: 14px; position: relative; }
+  .masthead-rule::after {
+    content: "★"; position: absolute; top: -13px; left: 50%; transform: translateX(-50%);
+    color: var(--gold); background: var(--paper); padding: 0 12px; font-size: 13px;
+  }
+  .masthead { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .wordmark {
+    font-family: var(--display); font-weight: 700; font-size: 34px; letter-spacing: .01em;
+    margin: 0; color: var(--navy-deep);
+  }
+  .wordmark .star { color: var(--gold); font-size: 22px; vertical-align: 6px; margin-left: 2px; }
+  .masthead .edition {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--muted); text-align: right;
+  }
+  .standfirst {
+    margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--rule);
+    font-style: italic; color: var(--ink-soft); font-size: 15px;
+  }
+  .standfirst b { color: var(--gold); font-style: normal; font-weight: 600; }
+
+  .coverage { margin-top: 10px; }
+  .coverage summary {
+    cursor: pointer; list-style: none; display: inline-block;
+    font-family: var(--mono); font-size: 11px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--muted);
+    border-bottom: 1px dotted var(--rule-strong); padding-bottom: 1px;
+  }
+  .coverage summary::-webkit-details-marker { display: none; }
+  .coverage summary:hover { color: var(--navy); border-color: var(--navy); }
+  .coverage summary .n { color: var(--gold); font-weight: 600; }
+  .coverage summary::after { content: " ▸"; }
+  .coverage[open] summary::after { content: " ▾"; }
+  .coverage .doc-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .coverage .doc {
+    font-family: var(--mono); font-size: 10.5px; color: var(--ink-soft);
+    background: var(--card); border: 1px solid var(--rule);
+    border-radius: 2px; padding: 3px 8px;
+  }
+  .coverage .note {
+    width: 100%; font-family: var(--serif); font-style: italic;
+    font-size: 13px; color: var(--muted); margin-top: 6px;
+  }
+
+  main {
+    position: relative; z-index: 1;
+    max-width: 780px; margin: 0 auto; padding: 8px 20px 190px;
+  }
+
+  /* ---- empty state ---- */
+  .starter { padding: 34px 0 10px; animation: rise .6s ease both; }
+  .starter .lede {
+    font-family: var(--display); font-style: italic; font-weight: 400;
+    font-size: 30px; line-height: 1.25; color: var(--ink); margin: 0 0 6px;
+  }
+  .starter .lede em { color: var(--navy); font-style: italic; }
+  .starter p.small { color: var(--muted); font-size: 15px; margin: 4px 0 18px; }
+  .starter .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 620px) { .starter .cards { grid-template-columns: 1fr; } }
+  .starter button {
+    text-align: left; cursor: pointer; padding: 13px 15px;
+    font: 15px/1.45 var(--serif); color: var(--ink);
+    background: var(--card); border: 1px solid var(--rule); border-radius: 3px;
+    box-shadow: 0 1px 0 rgba(60,45,10,.06);
+    transition: border-color .15s, transform .15s, box-shadow .15s;
+  }
+  .starter button::before {
+    content: "→ "; color: var(--gold); font-family: var(--mono); font-size: 13px;
+  }
+  .starter button:hover {
+    border-color: var(--gold); transform: translateY(-1px);
+    box-shadow: 0 3px 10px rgba(60,45,10,.10);
+  }
+
+  /* ---- turns ---- */
+  .turn { margin: 34px 0 0; animation: rise .5s ease both; }
+  .turn .file-line {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: .13em;
+    text-transform: uppercase; color: var(--muted); margin-bottom: 6px;
+  }
+  .turn .file-line::after { content: ""; flex: 1; border-top: 1px solid var(--rule); }
+  .q {
+    font-family: var(--display); font-weight: 600; font-style: italic;
+    font-size: 21px; line-height: 1.35; color: var(--navy-deep); margin: 0 0 12px;
+  }
+  .a {
+    background: var(--card); border: 1px solid var(--rule); border-left: 3px solid var(--gold);
+    border-radius: 3px; padding: 18px 22px 8px;
+    box-shadow: 0 1px 0 rgba(60,45,10,.05), 0 8px 24px -18px rgba(50,38,8,.35);
+  }
+  .a p { margin: 0 0 12px; }
+  .a h4 {
+    font-family: var(--display); font-size: 16px; font-weight: 700; font-style: normal;
+    margin: 16px 0 8px; color: var(--navy-deep);
+  }
+  .a ul, .a ol { margin: 0 0 12px; padding-left: 24px; }
+  .a li { margin: 4px 0; }
+  .a ul { list-style: none; padding-left: 6px; }
+  .a ul li { padding-left: 18px; position: relative; }
+  .a ul li::before { content: "▪"; color: var(--gold); position: absolute; left: 0; top: 0; font-size: 12px; }
+  .a strong { color: var(--navy-deep); }
+  .a code {
+    font-family: var(--mono); font-size: .85em; background: var(--paper-deep);
+    padding: 1px 5px; border-radius: 3px;
+  }
+  .a .pending { color: var(--muted); font-style: italic; }
+  .a .pending .dots span { animation: blink 1.4s infinite both; }
+  .a .pending .dots span:nth-child(2) { animation-delay: .2s; }
+  .a .pending .dots span:nth-child(3) { animation-delay: .4s; }
+  .a.error { border-left-color: var(--red-ink); color: var(--red-ink); padding-bottom: 18px; }
+
+  sup.marker {
+    font-family: var(--mono); font-size: 11px; font-weight: 600; line-height: 1;
+    color: var(--navy); background: rgba(28,63,143,.08);
+    border: 1px solid rgba(28,63,143,.25); border-radius: 3px;
+    padding: 1px 4px; margin: 0 1px; cursor: pointer; user-select: none;
+    transition: background .15s, color .15s;
+  }
+  sup.marker:hover { background: var(--navy); color: var(--card); }
+
+  .meta { display: flex; gap: 8px; align-items: center; margin: 10px 2px 0; flex-wrap: wrap; }
+  .badge {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+    padding: 3px 8px; border-radius: 2px; border: 1px solid var(--rule); color: var(--muted);
+    background: var(--card);
+  }
+  .badge.escalated { border-color: var(--gold); color: var(--gold); background: rgba(232,185,49,.08); }
+  .badge.insufficient { border-color: var(--amber-ink); color: var(--amber-ink); background: var(--amber-bg); }
+
+  .cites { margin-top: 14px; border-top: 1px solid var(--rule); padding-top: 10px; }
+  .cites .cites-label {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 8px;
+  }
+  .cite {
+    display: grid; grid-template-columns: 34px 1fr; gap: 6px;
+    font-size: 14px; color: var(--ink-soft); padding: 6px 4px; border-radius: 3px;
+    transition: background .3s;
+  }
+  .cite.flash { background: rgba(232,185,49,.25); }
+  .cite .fn {
+    font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--navy);
+    padding-top: 3px;
+  }
+  .cite .title { font-weight: 600; color: var(--ink); }
+  .cite a {
+    color: var(--navy); font-family: var(--mono); font-size: 11.5px;
+    text-decoration: none; border-bottom: 1px solid rgba(28,63,143,.35); margin-left: 8px;
+  }
+  .cite a:hover { color: var(--gold); border-color: var(--gold); }
+  .cite .quote { display: block; margin-top: 2px; font-style: italic; font-size: 13.5px; }
+
+  /* ---- input dock ---- */
+  form { position: fixed; bottom: 0; left: 0; right: 0; z-index: 2;
+    background: linear-gradient(transparent, var(--paper) 26%);
+    padding: 34px 20px 16px;
+  }
+  .dock { max-width: 780px; margin: 0 auto; }
+  .industry-row {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+  }
+  .industry-row label {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--muted); white-space: nowrap;
+  }
+  .industry-row input {
+    width: 240px; max-width: 45vw; padding: 6px 10px;
+    font: 13.5px/1.3 var(--serif); font-style: italic; color: var(--ink);
+    background: transparent; border: none; border-bottom: 1px dotted var(--rule-strong);
+  }
+  .industry-row input:focus { outline: none; border-bottom: 1px solid var(--navy); font-style: normal; }
+  .industry-row input::placeholder { color: var(--muted); }
+  .inputrow {
+    display: flex; gap: 0; background: var(--card);
+    border: 1px solid var(--rule-strong); border-radius: 3px;
+    box-shadow: 0 2px 0 rgba(60,45,10,.06), 0 14px 34px -20px rgba(50,38,8,.45);
+    transition: border-color .15s;
+  }
+  .inputrow:focus-within { border-color: var(--navy); }
+  input[type=text] {
+    flex: 1; padding: 15px 17px; border: none; background: transparent;
+    font: 16.5px/1.4 var(--serif); color: var(--ink);
+  }
+  input[type=text]::placeholder { color: var(--muted); font-style: italic; }
+  input[type=text]:focus { outline: none; }
+  button.ask {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .18em; text-transform: uppercase;
+    border: none; cursor: pointer; padding: 0 26px; margin: 6px; border-radius: 2px;
+    background: var(--navy); color: #f4efe2; font-weight: 600;
+    transition: background .15s;
+  }
+  button.ask:hover:not(:disabled) { background: var(--gold); color: var(--ink); }
+  button.ask:disabled { opacity: .45; cursor: wait; }
+  .hint {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em;
+    color: var(--muted); margin: 9px 2px 0;
+  }
+  .hint.warn { color: var(--amber-ink); }
+
+  @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  @keyframes blink { 0%, 80%, 100% { opacity: .2; } 40% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+    html { scroll-behavior: auto; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="masthead-rule"></div>
+  <div class="masthead">
+    <h1 class="wordmark">EURAG<span class="star">★</span></h1>
+    <div class="edition">EU SME Intelligence Hub<br>Every claim cited</div>
+  </div>
+  <p class="standfirst">Compliance &amp; funding answers for European small business, grounded in the
+  <b>official texts</b> — EUR-Lex regulations, directives and funding schemes. Information, not legal advice.</p>
+  <details class="coverage" id="coverage">
+    <summary>Current expertise: <span class="n" id="doc-count">…</span> official texts — data &amp; digital · commerce &amp; consumer · reporting · funding</summary>
+    <div class="doc-list" id="doc-list"></div>
+  </details>
+</header>
+
+<main id="log">
+  <div class="starter" id="starter">
+    <p class="lede">Ask the corpus <em>anything</em> an EU regulation should answer.</p>
+    <p class="small">Try one of these case files:</p>
+    <div class="cards">
+      <button data-q="Do I need a data protection officer for a 30-person company?">Do I need a data protection officer for a 30-person company?</button>
+      <button data-q="Does my company count as an SME under EU rules?">Does my company count as an SME under EU rules?</button>
+      <button data-q="Which AI systems count as high-risk under the AI Act?">Which AI systems count as high-risk under the AI Act?</button>
+      <button data-q="What interest can I charge when a business customer pays late?">What interest can I charge on late B2B payments?</button>
+    </div>
+  </div>
+</main>
+
+<form id="form">
+  <div class="dock">
+    <div class="industry-row">
+      <label for="industry">Your industry · optional</label>
+      <input id="industry" list="industries" placeholder="e.g. software, food, manufacturing…" maxlength="80" autocomplete="off">
+      <datalist id="industries">
+        <option value="software & digital services"></option>
+        <option value="e-commerce & retail"></option>
+        <option value="food & beverage"></option>
+        <option value="manufacturing & machinery"></option>
+        <option value="textiles & apparel"></option>
+        <option value="construction"></option>
+        <option value="health & life sciences"></option>
+        <option value="finance & insurance"></option>
+        <option value="hospitality & tourism"></option>
+        <option value="agriculture"></option>
+        <option value="logistics & transport"></option>
+        <option value="creative & media"></option>
+      </datalist>
+    </div>
+    <div class="inputrow">
+      <input type="text" id="question" placeholder="Ask a compliance or funding question…" autocomplete="off" minlength="3" required>
+      <button type="submit" class="ask" id="send">Ask</button>
+    </div>
+    <div class="hint" id="status"></div>
+  </div>
+</form>
+
+<script>
+const log = document.getElementById("log");
+const form = document.getElementById("form");
+const input = document.getElementById("question");
+const send = document.getElementById("send");
+const statusEl = document.getElementById("status");
+const industryEl = document.getElementById("industry");
+let queryNo = 0;
+
+/* industry is optional context: remembered locally, sent with each query */
+industryEl.value = localStorage.getItem("eurag-industry") || "";
+industryEl.addEventListener("change", () =>
+  localStorage.setItem("eurag-industry", industryEl.value.trim()));
+
+/* coverage: list every document actually in the corpus */
+fetch("/documents").then(r => r.json()).then(d => {
+  const docs = d.documents || [];
+  document.getElementById("doc-count").textContent = docs.length;
+  document.getElementById("doc-list").innerHTML =
+    docs.map(doc => `<span class="doc">${esc(doc.title)}</span>`).join("") +
+    `<span class="note">Cross-sector EU law and funding schemes. Sector-specific ` +
+    `regimes (food, machinery, textiles…) are not ingested yet — answers will say so ` +
+    `rather than guess.</span>`;
+}).catch(() => {});
+
+fetch("/healthz").then(r => r.json()).then(h => {
+  statusEl.textContent =
+    `${h.documents} documents indexed · ${h.embedder} · ${h.llm}`;
+  if (h.llm === "extractive") {
+    const note = document.createElement("div");
+    note.className = "hint warn";
+    note.textContent =
+      "Quote mode: no ANTHROPIC_API_KEY found — answers are verbatim quotes from " +
+      "official sources. Add the key to .env and restart for written answers.";
+    statusEl.after(note);
+  }
+}).catch(() => { statusEl.textContent = "API unreachable"; });
+
+document.getElementById("starter").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-q]");
+  if (btn) { input.value = btn.dataset.q; form.requestSubmit(); }
+});
+
+function esc(s) {
+  return s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+}
+
+/* --- minimal markdown: bold, italics, code, headings, lists, [N] markers ---
+   operates on HTML-escaped text only, so no raw model output reaches the DOM */
+function inline(s) {
+  return s
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[\s(])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\[(\d{1,2})\]/g, '<sup class="marker" data-m="$1" title="source [$1]">$1</sup>');
+}
+function renderMarkdown(raw) {
+  const lines = esc(raw).split("\n");
+  let html = "", list = null, para = [];
+  const flushPara = () => {
+    if (para.length) { html += `<p>${para.map(inline).join("<br>")}</p>`; para = []; }
+  };
+  const flushList = () => {
+    if (list) {
+      html += `<${list.tag}>` + list.items.map(i => `<li>${inline(i)}</li>`).join("") + `</${list.tag}>`;
+      list = null;
+    }
+  };
+  for (const line of lines) {
+    const t = line.trim();
+    const ul = t.match(/^[-•*]\s+(.*)/);
+    const ol = t.match(/^\d{1,2}[.)]\s+(.*)/);
+    const h = t.match(/^#{1,4}\s+(.*)/);
+    if (!t) { flushPara(); flushList(); }
+    else if (ul) { flushPara(); if (!list || list.tag !== "ul") { flushList(); list = {tag: "ul", items: []}; } list.items.push(ul[1]); }
+    else if (ol) { flushPara(); if (!list || list.tag !== "ol") { flushList(); list = {tag: "ol", items: []}; } list.items.push(ol[1]); }
+    else if (h) { flushPara(); flushList(); html += `<h4>${inline(h[1])}</h4>`; }
+    else { flushList(); para.push(t); }
+  }
+  flushPara(); flushList();
+  return html;
+}
+
+/* click a [N] marker → flash the matching footnote */
+log.addEventListener("click", e => {
+  const m = e.target.closest("sup.marker");
+  if (!m) return;
+  const turn = m.closest(".turn");
+  const fn = turn && turn.querySelector(`.cite[data-m="${m.dataset.m}"]`);
+  if (fn) {
+    fn.scrollIntoView({behavior: "smooth", block: "center"});
+    fn.classList.add("flash");
+    setTimeout(() => fn.classList.remove("flash"), 1600);
+  }
+});
+
+form.addEventListener("submit", async e => {
+  e.preventDefault();
+  const question = input.value.trim();
+  if (!question) return;
+  const starter = document.getElementById("starter");
+  if (starter) starter.remove();
+  queryNo += 1;
+  const stamp = new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+  const industry = industryEl.value.trim();
+
+  const turn = document.createElement("div");
+  turn.className = "turn";
+  turn.innerHTML =
+    `<div class="file-line">Query ${String(queryNo).padStart(3, "0")} · ${stamp}` +
+    (industry ? ` · ${esc(industry)}` : "") + `</div>` +
+    `<p class="q">${esc(question)}</p>` +
+    `<div class="a"><p class="pending">Consulting the corpus` +
+    `<span class="dots"><span>.</span><span>.</span><span>.</span></span>` +
+    `<br><span style="font-size:13px">hard questions escalate to a stronger model — this can take a minute</span></p></div>`;
+  log.appendChild(turn);
+  turn.scrollIntoView({behavior: "smooth", block: "end"});
+  input.value = ""; send.disabled = true;
+
+  try {
+    const res = await fetch("/query", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(industry ? {question, industry} : {question}),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    let badges = `<span class="badge">mode: ${esc(data.mode)}</span>`;
+    if (data.escalated) badges += `<span class="badge escalated">★ escalated to stronger model</span>`;
+    if (data.insufficient) badges += `<span class="badge insufficient">sources incomplete</span>`;
+
+    let cites = "";
+    if (data.citations.length) {
+      cites = `<div class="cites"><div class="cites-label">Sources</div>` +
+        data.citations.map(c => {
+          const link = c.source_url
+            ? `<a href="${esc(c.source_url)}" target="_blank" rel="noopener">official text ↗</a>` : "";
+          return `<div class="cite" data-m="${c.marker}"><span class="fn">[${c.marker}]</span>` +
+                 `<span><span class="title">${esc(c.title)}</span>${link}` +
+                 `<span class="quote">“${esc(c.quote)}…”</span></span></div>`;
+        }).join("") + `</div>`;
+    }
+
+    turn.querySelector(".a").outerHTML =
+      `<div class="a">${renderMarkdown(data.answer)}${cites}</div><div class="meta">${badges}</div>`;
+  } catch (err) {
+    turn.querySelector(".a").classList.add("error");
+    turn.querySelector(".a").textContent = "Request failed: " + err.message;
+  } finally {
+    send.disabled = false;
+    turn.scrollIntoView({behavior: "smooth", block: "end"});
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,48 @@
+---
+title: National SME funding schemes — Germany (KfW) and France (Bpifrance)
+source_url: https://www.kfw.de/inlandsfoerderung/Unternehmen/
+source_type: national-scheme
+language: en
+---
+Headline national funding channels for SMEs in Germany and France. Snapshot
+for orientation — programme terms change; the operator's site is
+authoritative. (Germany: kfw.de; France: bpifrance.fr)
+
+Germany — KfW (Kreditanstalt für Wiederaufbau) is the federal promotional
+bank. SMEs do not apply to KfW directly: applications go through the
+company's house bank (Hausbankprinzip), which passes the loan through and
+shares the risk.
+
+ERP Gründerkredit – StartGeld: promotional loan of up to EUR 125,000 for
+founders and young enterprises (up to five years after formation), covering
+investments and working capital, with KfW assuming a large share of the house
+bank's risk — which makes financing accessible to companies without much
+collateral.
+
+ERP-Förderkredit KMU: the general promotional loan programme for established
+SMEs, financing investments and working capital at favourable interest rates,
+with repayment-free start years. Variants exist for ventures in regional
+assistance areas.
+
+KfW also operates programmes for digitalisation and innovation
+(ERP-Digitalisierungs- und Innovationskredit) and for energy efficiency and
+climate action in companies (Bundesförderung für effiziente Gebäude and
+Klimaschutzoffensive für den Mittelstand). Grant-type support for consulting
+(Förderung unternehmerischen Know-hows, via BAFA) complements the loans.
+
+France — Bpifrance is the French public investment bank and the single
+counter for state SME support: loans, guarantees, innovation grants and
+equity.
+
+Prêt Croissance and related growth loans finance intangible investments and
+working capital needs of SMEs, typically without collateral on the company's
+assets or personal guarantees from the founder — designed to sit alongside a
+matching bank loan.
+
+Bourse French Tech and the aides à l'innovation provide grants and repayable
+advances for innovative startups and SMEs (feasibility studies, R&D and
+prototyping), administered through Bpifrance's regional offices.
+
+Bpifrance guarantees (Garantie de projets) cover a significant share of a
+commercial bank's risk on SME loans for creation, transmission or
+international development — the SME's bank applies for the guarantee.

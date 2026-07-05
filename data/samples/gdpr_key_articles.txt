@@ -1,0 +1,81 @@
+---
+title: GDPR (Regulation (EU) 2016/679) — key articles for SMEs
+source_url: https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32016R0679
+source_type: eur-lex
+language: en
+---
+Regulation (EU) 2016/679 (General Data Protection Regulation, GDPR). Curated
+excerpts of the articles small and medium enterprises ask about most. The
+authoritative text is the EUR-Lex source; this file is a faithful excerpt.
+
+Article 3 — Territorial scope. The GDPR applies to the processing of personal
+data in the context of the activities of an establishment of a controller or a
+processor in the Union, regardless of whether the processing takes place in
+the Union or not. It also applies to controllers or processors not established
+in the Union where the processing relates to offering goods or services to
+data subjects in the Union (irrespective of whether payment is required), or
+to monitoring their behaviour as far as that behaviour takes place within the
+Union. Company size does not matter for scope: a webshop of any headcount that
+sells to customers in the Union processes personal data under the GDPR.
+
+Article 6 — Lawfulness of processing. Processing is lawful only if and to the
+extent that at least one of the following applies: (a) the data subject has
+given consent to the processing for one or more specific purposes; (b)
+processing is necessary for the performance of a contract to which the data
+subject is party, or to take steps at the request of the data subject prior to
+entering into a contract; (c) processing is necessary for compliance with a
+legal obligation to which the controller is subject; (d) processing is
+necessary to protect the vital interests of the data subject or another
+natural person; (e) processing is necessary for the performance of a task
+carried out in the public interest or in the exercise of official authority;
+(f) processing is necessary for the purposes of the legitimate interests
+pursued by the controller or a third party, except where such interests are
+overridden by the interests or fundamental rights and freedoms of the data
+subject, in particular where the data subject is a child.
+
+Article 17 — Right to erasure ("right to be forgotten"). The data subject has
+the right to obtain from the controller the erasure of personal data
+concerning him or her without undue delay where one of the following grounds
+applies: the personal data are no longer necessary in relation to the purposes
+for which they were collected; the data subject withdraws consent and there is
+no other legal ground for the processing; the data subject objects to the
+processing and there are no overriding legitimate grounds; the personal data
+have been unlawfully processed; erasure is required for compliance with a
+legal obligation in Union or Member State law; or the data were collected in
+relation to the offer of information society services to a child.
+
+Article 30 — Records of processing activities. Each controller shall maintain
+a record of processing activities under its responsibility, including the
+purposes of processing, categories of data subjects and personal data,
+categories of recipients, envisaged time limits for erasure, and a general
+description of security measures. Article 30(5) provides a derogation: this
+obligation shall not apply to an enterprise or organisation employing fewer
+than 250 persons — unless the processing it carries out is likely to result in
+a risk to the rights and freedoms of data subjects, the processing is not
+occasional, or the processing includes special categories of data (Article
+9(1)) or personal data relating to criminal convictions and offences (Article
+10). In practice, most businesses process employee and customer data more than
+occasionally, so many SMEs still keep records for those processing activities.
+
+Article 33 — Notification of a personal data breach to the supervisory
+authority. In the case of a personal data breach, the controller shall without
+undue delay and, where feasible, not later than 72 hours after having become
+aware of it, notify the breach to the competent supervisory authority, unless
+the breach is unlikely to result in a risk to the rights and freedoms of
+natural persons. Where notification is not made within 72 hours, it shall be
+accompanied by reasons for the delay. Processors must notify the controller
+without undue delay after becoming aware of a breach.
+
+Article 37 — Designation of the data protection officer. The controller and
+the processor shall designate a data protection officer (DPO) in any case
+where: (a) the processing is carried out by a public authority or body; (b)
+the core activities of the controller or processor consist of processing
+operations which require regular and systematic monitoring of data subjects
+on a large scale; or (c) the core activities consist of processing on a large
+scale of special categories of data (Article 9) or data relating to criminal
+convictions (Article 10). Note: the GDPR sets no employee-count threshold for
+the DPO duty — a 30-person company does not need a DPO merely because of its
+size, but does if its core activities involve large-scale monitoring or
+large-scale special-category data. Member State law may impose stricter rules
+(for example, Germany's BDSG requires a DPO where, as a rule, at least 20
+persons are constantly engaged in automated processing of personal data).

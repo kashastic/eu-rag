@@ -1,0 +1,24 @@
+[project]
+name = "eurag"
+version = "0.1.0"
+description = "EURAG — EU SME Intelligence Hub: citation-first RAG for EU compliance and funding questions"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "qdrant-client>=1.12",
+    "anthropic>=0.92",
+    "fastembed>=0.4; platform_machine != 'unsupported'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "httpx>=0.27",
+]
+
+[tool.setuptools.packages.find]
+include = ["core*", "api*", "data*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

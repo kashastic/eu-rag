@@ -1,0 +1,45 @@
+---
+title: EU funding programmes for SMEs — overview
+source_url: https://single-market-economy.ec.europa.eu/access-finance_en
+source_type: ec-portal
+language: en
+---
+Overview of the main EU-level funding routes relevant to small and
+medium-sized enterprises. Figures are indicative of the 2021–2027 programming
+period; calls, rates and ceilings change per work programme, so the linked
+official portals are authoritative.
+
+Horizon Europe is the EU's research and innovation framework programme
+(2021–2027) with an overall budget of around EUR 95.5 billion. SMEs
+participate in collaborative research projects (typical funding rates of 70%
+for innovation actions and up to 100% for research and innovation actions)
+and through the European Innovation Council.
+
+The European Innovation Council (EIC) Accelerator supports individual startups
+and SMEs developing breakthrough innovations. It provides grant funding of up
+to EUR 2.5 million, which can be combined with an equity investment component
+(historically in the range of EUR 0.5 to 15 million) through the EIC Fund.
+Applications are submitted by a single company; there is a short application,
+a full application and a jury interview stage.
+
+The Digital Europe Programme funds digital capacity building — artificial
+intelligence, cybersecurity, advanced digital skills and the network of
+European Digital Innovation Hubs (EDIHs). EDIHs offer SMEs subsidised or free
+services such as test-before-invest, training and digitalisation advice.
+
+The Single Market Programme continues COSME-type support for SME
+competitiveness, including the Enterprise Europe Network (free advisory
+services for SMEs on EU market access, partnering and funding) and actions on
+access to finance.
+
+InvestEU groups EU financial instruments: it does not give grants to SMEs
+directly, but backs loans, guarantees and venture investments issued by
+national promotional banks and private financial intermediaries. In practice
+an SME accesses InvestEU-backed finance through its bank, which is also the
+usual channel for guarantee-backed working-capital and growth loans.
+
+Cohesion policy funds (in particular the European Regional Development Fund,
+ERDF) finance a large share of SME support on the ground — regional grant
+schemes for digitalisation, energy efficiency, and industrial modernisation
+are typically ERDF co-financed and administered by national or regional
+managing authorities, not by Brussels.
