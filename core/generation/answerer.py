@@ -28,7 +28,8 @@ nothing beyond what you actually used, and end your reply with the exact token \
 INSUFFICIENT_SOURCES on its own final line (do not use the token when the \
 sources do answer the question). Never invent regulations, article numbers, \
 deadlines, or amounts. You are not a lawyer; for binding advice the user \
-should consult one. Answer in the language of the question."""
+should consult one. Write the answer in the same language the question is \
+written in — never switch languages on your own."""
 
 # the model's structured low-confidence signal; stripped before shipping
 INSUFFICIENT_MARKER = "INSUFFICIENT_SOURCES"

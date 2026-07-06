@@ -41,12 +41,24 @@ class Pipeline:
             candidate = get_llm_client(self.settings.escalation_model)
             if not isinstance(candidate, ExtractiveClient):
                 self.escalation_llm = candidate
+        expander = decomposer = None
+        if not isinstance(self.llm, ExtractiveClient):
+            from core.retrieval.expansion import HydeExpander, QueryDecomposer
+
+            if self.settings.hyde_model not in ("", "none"):
+                expander = HydeExpander(get_llm_client(self.settings.hyde_model))
+            if self.settings.decompose_model not in ("", "none"):
+                decomposer = QueryDecomposer(
+                    get_llm_client(self.settings.decompose_model)
+                )
         self.retriever = HybridRetriever(
             self.bm25,
             self.vectors,
             self.embedder,
             reranker=get_reranker(self.settings.reranker),
             get_chunks=self.registry.get_chunks,
+            expander=expander,
+            decomposer=decomposer,
         )
         self._rebuild_bm25()
 

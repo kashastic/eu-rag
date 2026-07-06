@@ -41,6 +41,37 @@ def test_very_long_paragraph_is_split_on_sentences():
     assert len(chunks) > 1
 
 
+def test_article_headings_are_hard_boundaries():
+    doc = make_doc(
+        "Recital text before any article.\n\n"
+        "Article 1\n\nScope\n\nThis law applies to widgets.\n\n"
+        "Article 2\n\nDefinitions\n\n'Widget' means a thing.\n\n"
+        "pursuant to Article 3 of Regulation X, inline mentions do not split."
+    )
+    chunks = chunk_document(doc)
+    art1 = [c for c in chunks if c.text.startswith("Article 1 — Scope")]
+    art2 = [c for c in chunks if c.text.startswith("Article 2 — Definitions")]
+    assert art1 and art2
+    assert "'Widget' means" not in art1[0].text  # no straddling
+    assert "inline mentions do not split" in art2[0].text
+
+
+def test_every_article_chunk_carries_its_heading():
+    long_body = "\n\n".join(" ".join(f"w{i}{j}" for j in range(80)) for i in range(8))
+    doc = make_doc(f"Article 7\n\nConditions for consent\n\n{long_body}")
+    chunks = chunk_document(doc)
+    assert len(chunks) > 1
+    for chunk in chunks:
+        assert chunk.text.startswith("Article 7 — Conditions for consent")
+
+
+def test_prose_after_heading_is_not_mistaken_for_title():
+    doc = make_doc("Article 5\n\nMember States shall ensure compliance.\n\nMore text.")
+    chunks = chunk_document(doc)
+    assert chunks[0].text.startswith("Article 5\n")
+    assert "Member States shall ensure compliance." in chunks[0].text
+
+
 def test_chunks_carry_provenance():
     doc = make_document(
         title="GDPR", text="Some text.", source_url="https://example.eu", source_type="eur-lex"

@@ -2,6 +2,49 @@
 
 Running log of build sessions. Newest first.
 
+## 2026-07-06 (M2 complete) — article-aware chunking, HyDE, decomposition
+Each change measured on the harness (25 golden cases incl. 3 new compound
+questions); merged only what the numbers justified.
+
+| config | doc_hit | mrr | phrase | compound |
+|---|---|---|---|---|
+| before (para chunks @220w + reranker) | 100% | 0.98 | 91%* | 67% |
+| article chunks @220w | 100% | 1.00 | 88% | 67% |
+| article chunks @320w | 100% | 1.00 | 92% | 67% |
+| + HyDE (haiku) — **shipped default** | 100% | 1.00 | 92% | 100% |
+| + decomposition (haiku) | 100% | 1.00 | 92% | 67–100% (unstable) |
+
+*91% measured against a phrase spec that turned out to reward the wrong
+article (Pay Transparency Art. 7 vs Art. 5 for applicants); spec fixed.
+
+- **Article-aware chunking**: "Article N" heading lines are hard chunk
+  boundaries and every chunk carries its heading ("Article 37 — Designation
+  of the data protection officer"). Budget raised 220→320 words: median
+  article is 122 words, 77% of the corpus's 1,715 articles now fit in one
+  chunk (still inside the reranker's 512-token window). This finally fixed
+  the GDPR Art. 37(1) DPO miss — the answer is one whole chunk that leads
+  with its own heading. Gotcha found on the way: `pipeline.ingest` skips
+  unchanged content hashes, so chunker changes need a from-scratch reseed
+  (`rm -rf var && python -m data.seed`) — first "measurement" was silently
+  running on old chunks.
+- **HyDE** (`core/retrieval/expansion.py`): Haiku drafts a 2–4 sentence
+  hypothetical regulation passage; the vector leg embeds question+passage,
+  BM25 keeps the raw question (regulation numbers must stay literal).
+  Compound-question retrieval 67%→100%, stable across runs. One Haiku call
+  per query (~1s, ~$0.0005). Default ON.
+- **Decomposition** (same module): splits compound questions into
+  sub-queries, RRF-merges their candidate pools, reranks against the
+  original question. Measured honestly: no gain on top of HyDE — the
+  reranker (scoring vs the original question) pushes sub-query candidates
+  back down. Kept config-gated, default OFF.
+- Remaining known misses (2/24 phrase cases): GDPR Art. 6 lawful-bases and
+  Late Payment statutory-interest — in both, the right *document and
+  article-family* is retrieved but the reranker prefers an adjacent slice
+  (Art. 6 later paragraphs; recovery-costs Art. 6 instead of interest
+  Art. 3). The escalation cascade covers these at answer time.
+- 92 tests passing. M2 closed; next: M3 security spine or Tier-3 funding
+  scrapers.
+
 ## 2026-07-06 (later) — second EUR-Lex wave: corpus doubled to 31 acts
 - 15 more official texts pulled and ingested (corpus: 33 docs / 5,296
   chunks). Chosen horizontal since the industries question is still open:

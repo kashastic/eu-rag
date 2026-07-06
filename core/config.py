@@ -54,6 +54,16 @@ class Settings:
     escalation_top_k: int = field(
         default_factory=lambda: int(os.environ.get("EURAG_ESCALATION_TOP_K", "12"))
     )
+    # query-time expansion, both via a small cheap model; "none" disables.
+    # Defaults set by golden-harness measurement (DEVLOG 2026-07-06): HyDE
+    # lifted compound-question retrieval 67%→100% at one Haiku call per
+    # query; decomposition showed no gain on top of HyDE, so it ships off.
+    hyde_model: str = field(
+        default_factory=lambda: os.environ.get("EURAG_HYDE_MODEL", "claude-haiku-4-5")
+    )
+    decompose_model: str = field(
+        default_factory=lambda: os.environ.get("EURAG_DECOMPOSE_MODEL", "none")
+    )
     # cross-encoder reranker: "none" disables; otherwise a fastembed
     # TextCrossEncoder model name. Default measured on the golden harness
     # (DEVLOG 2026-07-05): phrase_hit 82%→88% at doc_hit 100%, costing ~1s

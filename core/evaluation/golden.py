@@ -23,6 +23,9 @@ class GoldenCase:
     doc_marker: str  # substring expected in the retrieved document title
     phrases: tuple[str, ...] = ()  # verbatim, case-insensitive; any-of
     core: bool = True  # False → skip when the document is not in the corpus
+    # compound questions: ALL these title markers must appear in the top-k
+    # (measures multi-hop / decomposition quality)
+    requires_all: tuple[str, ...] = ()
 
 
 CASES: list[GoldenCase] = [
@@ -149,7 +152,33 @@ CASES: list[GoldenCase] = [
     GoldenCase(
         "Must I share pay range information with job applicants?",
         "Pay Transparency",
-        ("right to information",),
+        # Art. 5 (applicants) or Art. 7 (employees) both answer this
+        ("initial pay or its range", "right to information"),
         core=False,
+    ),
+    # --- compound questions (multi-hop; decomposition target) ---------------
+    GoldenCase(
+        "If I sell software online, how long is the consumer guarantee and"
+        " within how many days can customers withdraw?",
+        "Consumer Rights",
+        ("period of 14 days",),
+        core=False,
+        requires_all=("Consumer Rights", "Digital Content"),
+    ),
+    GoldenCase(
+        "Do I have to notify a personal data breach and also report"
+        " significant incidents under NIS2?",
+        "GDPR",
+        ("not later than 72 hours",),
+        core=False,
+        requires_all=("GDPR", "NIS2"),
+    ),
+    GoldenCase(
+        "Can I refuse customers from another EU country and can I charge"
+        " them a different VAT rate?",
+        "Geo-blocking",
+        (),
+        core=False,
+        requires_all=("Geo-blocking", "VAT"),
     ),
 ]

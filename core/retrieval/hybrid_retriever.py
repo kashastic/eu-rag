@@ -32,12 +32,16 @@ class HybridRetriever:
         embedder: Embedder,
         reranker: Reranker | None = None,
         get_chunks: Callable[[list[str]], list[Chunk]] | None = None,
+        expander=None,  # HydeExpander: rewrites the vector-leg text
+        decomposer=None,  # QueryDecomposer: splits compound questions
     ):
         self.bm25 = bm25
         self.vectors = vectors
         self.embedder = embedder
         self.reranker = reranker
         self.get_chunks = get_chunks  # chunk texts for the reranker
+        self.expander = expander
+        self.decomposer = decomposer
 
     def retrieve(self, query: str, k: int = 6, max_per_doc: int = 2) -> list[str]:
         """Returns fused chunk_ids, best first.
@@ -53,14 +57,20 @@ class HybridRetriever:
         is too small to fill k otherwise."""
         reranking = self.reranker is not None and self.get_chunks is not None
         pool = max(k * 5, 30) if reranking else max(k * 3, 10)
-        lexical = [cid for cid, _ in self.bm25.search(query, k=pool)]
-        semantic = [
-            cid for cid, _ in self.vectors.search(self.embedder.embed_query(query), k=pool)
-        ]
-        fused = [cid for cid, _ in rrf_fuse([lexical, semantic])]
+
+        # compound questions retrieve once per sub-question; the rankings are
+        # then fused so each topic contributes candidates
+        queries = [query]
+        if self.decomposer:
+            queries += self.decomposer.subqueries(query)
+        rankings = [self._fused(q, pool) for q in queries]
+        fused = (
+            [cid for cid, _ in rrf_fuse(rankings)] if len(rankings) > 1 else rankings[0]
+        )
 
         if reranking:
             chunks = self.get_chunks(fused)
+            # rerank against the original question — sub-queries only widen recall
             order = self.reranker.rank(query, [c.text for c in chunks])
             fused = [chunks[i].chunk_id for i in order]
 
@@ -80,3 +90,14 @@ class HybridRetriever:
             if cid not in picked:
                 picked.append(cid)
         return picked
+
+    def _fused(self, query: str, pool: int) -> list[str]:
+        """BM25 + vector rankings for one query, RRF-fused. HyDE rewrites
+        only the vector leg — regulation numbers must stay literal for BM25."""
+        embed_text = self.expander.expand(query) if self.expander else query
+        lexical = [cid for cid, _ in self.bm25.search(query, k=pool)]
+        semantic = [
+            cid
+            for cid, _ in self.vectors.search(self.embedder.embed_query(embed_text), k=pool)
+        ]
+        return [cid for cid, _ in rrf_fuse([lexical, semantic])]

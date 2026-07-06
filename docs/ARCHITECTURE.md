@@ -60,6 +60,11 @@ boundaries.
   Fusion recall decides what is considered (pool of ≥30), the cross-encoder
   decides what wins. Shipped with before/after numbers from the harness
   (phrase_hit 82%→88% at doc_hit 100%; ~1s/query on CPU).
+- **`expansion.py`** — HyDE (default ON, Haiku): a cheap model drafts a
+  hypothetical regulation-style passage and the vector leg embeds
+  question+passage; BM25 keeps the raw question so regulation numbers stay
+  literal. Compound-question retrieval 67%→100%. Query decomposition lives
+  in the same module but ships OFF — measured, no gain on top of HyDE.
 - **`core/evaluation/`** — golden cases (`golden.py`, shared with tests) and
   the measurement harness (`python -m core.evaluation.harness`): doc_hit@k,
   doc MRR, and phrase_hit (does a retrieved chunk contain the verbatim

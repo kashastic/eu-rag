@@ -31,6 +31,7 @@ class CaseResult:
     doc_marker: str
     doc_rank: int | None  # 1-based rank of first expected-doc chunk
     phrase_hit: bool | None  # None when the case defines no phrases
+    all_docs_hit: bool | None  # compound cases: every required doc in top-k
     retrieved_titles: list[str]
 
     @property
@@ -57,11 +58,19 @@ def evaluate_case(pipeline: Pipeline, case: GoldenCase, k: int) -> CaseResult:
             for chunk in chunks
         )
 
+    all_docs_hit = None
+    if case.requires_all:
+        titles = [c.title.lower() for c in chunks]
+        all_docs_hit = all(
+            any(m.lower() in t for t in titles) for m in case.requires_all
+        )
+
     return CaseResult(
         question=case.question,
         doc_marker=case.doc_marker,
         doc_rank=doc_rank,
         phrase_hit=phrase_hit,
+        all_docs_hit=all_docs_hit,
         retrieved_titles=[c.title for c in chunks],
     )
 
@@ -71,8 +80,9 @@ def evaluate(pipeline: Pipeline, k: int = 6) -> dict:
     results: list[CaseResult] = []
     skipped: list[str] = []
     for case in CASES:
-        if not case.core and not any(
-            case.doc_marker.lower() in t for t in corpus_titles
+        needed = set(case.requires_all) | {case.doc_marker}
+        if not case.core and not all(
+            any(m.lower() in t for t in corpus_titles) for m in needed
         ):
             skipped.append(case.question)
             continue
@@ -80,6 +90,7 @@ def evaluate(pipeline: Pipeline, k: int = 6) -> dict:
 
     n = len(results)
     with_phrases = [r for r in results if r.phrase_hit is not None]
+    compound = [r for r in results if r.all_docs_hit is not None]
     summary = {
         "k": k,
         "cases": n,
@@ -90,6 +101,9 @@ def evaluate(pipeline: Pipeline, k: int = 6) -> dict:
             sum(r.phrase_hit for r in with_phrases) / len(with_phrases)
             if with_phrases
             else None
+        ),
+        "compound_hit_rate": (
+            sum(r.all_docs_hit for r in compound) / len(compound) if compound else None
         ),
     }
     return {"summary": summary, "results": [asdict(r) for r in results]}
@@ -116,15 +130,22 @@ def main() -> None:
     for r in report["results"]:
         rank = f"rank {r['doc_rank']}" if r["doc_rank"] else "MISS   "
         phrase = {True: "phrase ✓", False: "phrase ✗", None: "        "}[r["phrase_hit"]]
-        print(f"  {rank:8} {phrase}  [{r['doc_marker'][:20]:20}] {r['question'][:58]}")
+        multi = {True: "multi ✓", False: "multi ✗", None: "       "}[r["all_docs_hit"]]
+        print(
+            f"  {rank:8} {phrase} {multi}  [{r['doc_marker'][:20]:20}]"
+            f" {r['question'][:52]}"
+        )
     s = report["summary"]
     phrase_rate = (
         f"{s['phrase_hit_rate']:.0%}" if s["phrase_hit_rate"] is not None else "n/a"
     )
+    compound_rate = (
+        f"{s['compound_hit_rate']:.0%}" if s["compound_hit_rate"] is not None else "n/a"
+    )
     print(
         f"\n  k={s['k']}  cases={s['cases']} (+{s['skipped']} skipped)"
         f"  doc_hit={s['doc_hit_rate']:.0%}  doc_mrr={s['doc_mrr']:.2f}"
-        f"  phrase_hit={phrase_rate}"
+        f"  phrase_hit={phrase_rate}  compound_hit={compound_rate}"
     )
 
     if args.json:

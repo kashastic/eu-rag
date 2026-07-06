@@ -25,8 +25,8 @@ of guessing.
 - **Hybrid retrieval, measured** — BM25 + multilingual embeddings fused with
   RRF, reordered by a local cross-encoder reranker, capped per-document for
   citation diversity. Every retrieval change ships with before/after numbers
-  from the built-in eval harness (currently: doc_hit 100%, phrase_hit 91%
-  over 22 golden questions).
+  from the built-in eval harness (currently: doc_hit 100%, MRR 1.00,
+  phrase_hit 92%, compound_hit 100% over 25 golden questions).
 - **Verified corpus** — 31 EU acts pulled from EUR-Lex with title
   verification (a wrong CELEX id can't silently ingest the wrong law) and
   link checking (citations must never 404).
@@ -76,6 +76,8 @@ Real environment variables always override `.env` values.
 | `EURAG_ESCALATION_MODEL` | `claude-opus-4-8` | Consulted once when the primary answer is low-confidence. Set `none` to disable the cascade. |
 | `EURAG_ESCALATION_TOP_K` | `12` | How many chunks the escalation retry retrieves. |
 | `EURAG_RERANKER` | `Xenova/ms-marco-MiniLM-L-6-v2` | Local cross-encoder reranker (~1s/query on CPU, +6pp answer-passage precision). Set `none` to disable. |
+| `EURAG_HYDE_MODEL` | `claude-haiku-4-5` | HyDE query expansion: a cheap model drafts a hypothetical regulation passage for the vector search. Lifts multi-topic questions 67%→100%. Set `none` to disable. |
+| `EURAG_DECOMPOSE_MODEL` | `none` | Multi-hop query decomposition — measured, no gain over HyDE, so off by default. |
 | `EURAG_EMBEDDER` | `fastembed` | `hash` = deterministic offline embedder (tests / cold start). |
 | `EURAG_EMBED_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | Any fastembed-supported model. |
 | `EURAG_TOP_K` | `6` | Chunks retrieved per query. |
@@ -96,12 +98,13 @@ and reranking are local and free.
 
 ```
                         ┌──────────────────────────────────────────────┐
- EUR-Lex ──scraper──►   │  ingest: html→text → chunk (~220 words)      │
+ EUR-Lex ──scraper──►   │  ingest: html→text → chunk per article       │
  (title-verified,       │  → embed (multilingual MiniLM, local ONNX)   │
   cached, rate-limited) │  → SQLite registry + embedded Qdrant         │
                         └──────────────────────────────────────────────┘
                         ┌──────────────────────────────────────────────┐
- question ─────────►    │  retrieve: BM25 + vector search → RRF fusion │
+ question ─────────►    │  retrieve: HyDE (Haiku) → BM25 + vector      │
+                        │  search → RRF fusion                         │
                         │  → cross-encoder rerank (pool of 30+)        │
                         │  → max 2 chunks per document → top 6         │
                         └──────────────────────────────────────────────┘
@@ -127,8 +130,10 @@ time — and the loader rejects documents without it.
 **Retrieval** ([`core/retrieval/`](core/retrieval)) — lexical matching is
 load-bearing in legal text (regulation numbers and article references are
 exact strings semantic search fumbles), so BM25 and vector results are fused
-with Reciprocal Rank Fusion, then a local cross-encoder scores query/passage
-pairs jointly to promote the passage that actually answers the question.
+with Reciprocal Rank Fusion (the vector leg searches a HyDE-expanded query —
+a cheap model drafts a hypothetical regulation passage to bridge the register
+gap between questions and legal text), then a local cross-encoder scores
+query/passage pairs jointly to promote the passage that actually answers the question.
 Results are capped at 2 chunks per document — full regulations span hundreds
 of chunks, and without the cap one dominant act crowds out the right answer.
 
@@ -138,14 +143,15 @@ rejects uncited or mis-cited answers (one retry, then verbatim-quote
 fallback). The model must append a structured marker when sources are
 insufficient; that marker (or failed validation) triggers the Opus cascade.
 
-**Evaluation** ([`core/evaluation/`](core/evaluation)) — a golden set of 22
-questions with expected documents *and* expected verbatim passages. Run it
+**Evaluation** ([`core/evaluation/`](core/evaluation)) — a golden set of 25
+questions with expected documents, expected verbatim passages, and
+multi-document expectations for compound questions. Run it
 yourself:
 
 ```bash
 python -m core.evaluation.harness          # doc_hit@k, MRR, phrase_hit
 python -m infra.scripts.check_links        # every citation URL must resolve
-python -m pytest                           # 80 tests, fully offline
+python -m pytest                           # 92 tests, fully offline
 ```
 
 ## The corpus
