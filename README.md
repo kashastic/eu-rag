@@ -173,6 +173,11 @@ Official Journal of the European Union are authentic.
 | `POST /ingest` | add your own document (provenance required) |
 | `GET /healthz` | corpus size, active models |
 
+## License
+
+Code is [MIT](LICENSE). EU legal texts in the corpus are © European Union,
+reused under Decision 2011/833/EU (see [The corpus](#the-corpus)).
+
 ## Project docs
 
 Start at [`docs/WIKI.md`](docs/WIKI.md): architecture decisions
