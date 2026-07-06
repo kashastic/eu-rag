@@ -9,6 +9,8 @@ dependencies = [
     "qdrant-client>=1.12",
     "anthropic>=0.92",
     "fastembed>=0.4; platform_machine != 'unsupported'",
+    "pyjwt>=2.8",
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]

@@ -37,12 +37,18 @@ class VectorStore:
             vectors_config=qm.VectorParams(size=dim, distance=qm.Distance.COSINE),
         )
 
-    def upsert(self, chunks: list[Chunk], vectors: list[list[float]]) -> None:
+    def upsert(
+        self, chunks: list[Chunk], vectors: list[list[float]], tenant: str = "public"
+    ) -> None:
         points = [
             qm.PointStruct(
                 id=_point_id(chunk.chunk_id),
                 vector=vector,
-                payload={"chunk_id": chunk.chunk_id, "doc_id": chunk.doc_id},
+                payload={
+                    "chunk_id": chunk.chunk_id,
+                    "doc_id": chunk.doc_id,
+                    "tenant": tenant,
+                },
             )
             for chunk, vector in zip(chunks, vectors)
         ]
@@ -58,8 +64,17 @@ class VectorStore:
             ),
         )
 
-    def search(self, vector: list[float], k: int = 10) -> list[tuple[str, float]]:
-        hits = self._client.query_points(COLLECTION, query=vector, limit=k).points
+    def search(
+        self, vector: list[float], k: int = 10, tenants: list[str] | None = None
+    ) -> list[tuple[str, float]]:
+        query_filter = None
+        if tenants is not None:
+            query_filter = qm.Filter(
+                must=[qm.FieldCondition(key="tenant", match=qm.MatchAny(any=tenants))]
+            )
+        hits = self._client.query_points(
+            COLLECTION, query=vector, limit=k, query_filter=query_filter
+        ).points
         return [(hit.payload["chunk_id"], hit.score) for hit in hits]
 
     def close(self) -> None:

@@ -7,7 +7,7 @@ from core.retrieval.reranker import get_reranker
 
 
 class _NoVectors:
-    def search(self, vector, k):
+    def search(self, vector, k, tenants=None):
         return []
 
 
@@ -46,7 +46,7 @@ def _retriever(chunks: dict[str, str], reranker) -> HybridRetriever:
         _NoVectors(),
         _NullEmbedder(),
         reranker=reranker,
-        get_chunks=lambda ids: [_chunk(cid, chunks[cid]) for cid in ids],
+        get_chunks=lambda ids, tenants=None: [_chunk(cid, chunks[cid]) for cid in ids],
     )
 
 

@@ -3,7 +3,7 @@ from core.retrieval.hybrid_retriever import HybridRetriever, rrf_fuse
 
 
 class _NoVectors:
-    def search(self, vector, k):
+    def search(self, vector, k, tenants=None):
         return []
 
 

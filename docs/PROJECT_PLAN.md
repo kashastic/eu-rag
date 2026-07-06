@@ -35,13 +35,19 @@ company?" → cited answer in the browser.
 - Final M2 numbers (k=6, live corpus): doc_hit 100%, doc_mrr 1.00,
   phrase_hit 92%, compound_hit 100%
 
-## M3 — Security spine (before scaling data — GDPR is the product promise)
-- JWT auth (access + refresh), RBAC decorators
-- Multi-tenant isolation: Qdrant namespaces + registry row scoping, enforced
-  in one place (dependency injection), tested adversarially
-- PII scanning (Presidio) gate in ingestion — runs BEFORE embedding
-- AES-256-GCM at-rest encryption for source documents
-- Append-only audit log; GDPR Art. 17 erasure (registry + vectors + audit trail)
+## M3 — Security spine ✅ (2026-07-06)
+- [x] JWT auth (HS256, 15-min access + single-use refresh rotation via jti);
+      scrypt passwords; first user = admin, RBAC via `require_admin` dep
+- [x] Multi-tenant isolation: registry row scoping + Qdrant tenant filter,
+      derived once in `api/deps.py::allowed_tenants`, enforced at the
+      `get_chunks` gate, tested adversarially (`tests/test_security.py`)
+- [x] PII gate in ingestion — runs BEFORE embedding, rejects uploads with
+      personal data, exempts official sources (regex/Luhn; Presidio optional)
+- [x] AES-256-GCM at-rest encryption of chunk text (`EURAG_ENCRYPTION_KEY`),
+      transparent at the registry boundary, version-prefixed
+- [x] Append-only audit log (SQLite triggers); GDPR Art. 17 erasure across
+      registry + vectors + BM25, per-document and per-tenant
+- All off by default → local single-user mode unchanged. 141 tests.
 
 ## M4 — Data at scale (mostly done early, alongside M2)
 - [x] EUR-Lex scraper — 31 acts, title-verified (`data/scrapers/eurlex.py`)

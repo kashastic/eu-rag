@@ -31,7 +31,7 @@ class HybridRetriever:
         vectors: VectorStore,
         embedder: Embedder,
         reranker: Reranker | None = None,
-        get_chunks: Callable[[list[str]], list[Chunk]] | None = None,
+        get_chunks: Callable[..., list[Chunk]] | None = None,
         expander=None,  # HydeExpander: rewrites the vector-leg text
         decomposer=None,  # QueryDecomposer: splits compound questions
     ):
@@ -43,8 +43,14 @@ class HybridRetriever:
         self.expander = expander
         self.decomposer = decomposer
 
-    def retrieve(self, query: str, k: int = 6, max_per_doc: int = 2) -> list[str]:
-        """Returns fused chunk_ids, best first.
+    def retrieve(
+        self,
+        query: str,
+        k: int = 6,
+        max_per_doc: int = 2,
+        tenants: list[str] | None = None,
+    ) -> list[str]:
+        """Returns fused chunk_ids, best first, scoped to `tenants`.
 
         With a reranker, a larger fused pool is reordered by joint
         query/passage scoring before the top-k cut — fusion recall decides
@@ -63,13 +69,15 @@ class HybridRetriever:
         queries = [query]
         if self.decomposer:
             queries += self.decomposer.subqueries(query)
-        rankings = [self._fused(q, pool) for q in queries]
+        rankings = [self._fused(q, pool, tenants) for q in queries]
         fused = (
             [cid for cid, _ in rrf_fuse(rankings)] if len(rankings) > 1 else rankings[0]
         )
 
         if reranking:
-            chunks = self.get_chunks(fused)
+            # get_chunks enforces tenancy: a foreign chunk_id from the global
+            # BM25 index is dropped here before it can be reranked or returned
+            chunks = self.get_chunks(fused, tenants)
             # rerank against the original question — sub-queries only widen recall
             order = self.reranker.rank(query, [c.text for c in chunks])
             fused = [chunks[i].chunk_id for i in order]
@@ -91,13 +99,19 @@ class HybridRetriever:
                 picked.append(cid)
         return picked
 
-    def _fused(self, query: str, pool: int) -> list[str]:
+    def _fused(self, query: str, pool: int, tenants: list[str] | None = None) -> list[str]:
         """BM25 + vector rankings for one query, RRF-fused. HyDE rewrites
-        only the vector leg — regulation numbers must stay literal for BM25."""
+        only the vector leg — regulation numbers must stay literal for BM25.
+
+        The vector leg filters by tenant server-side; BM25 is a global
+        in-memory index, so its foreign candidates are dropped downstream by
+        the tenant-scoped get_chunks — the boundary that actually matters."""
         embed_text = self.expander.expand(query) if self.expander else query
         lexical = [cid for cid, _ in self.bm25.search(query, k=pool)]
         semantic = [
             cid
-            for cid, _ in self.vectors.search(self.embedder.embed_query(embed_text), k=pool)
+            for cid, _ in self.vectors.search(
+                self.embedder.embed_query(embed_text), k=pool, tenants=tenants
+            )
         ]
         return [cid for cid, _ in rrf_fuse([lexical, semantic])]

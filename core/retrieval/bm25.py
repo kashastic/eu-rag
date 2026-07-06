@@ -35,6 +35,9 @@ class BM25Index:
             self._df[term] += 1
         self._avg_len = sum(self._doc_len.values()) / len(self._doc_len)
 
+    def ids(self) -> list[str]:
+        return list(self._doc_tokens)
+
     def remove(self, chunk_id: str) -> None:
         tokens = self._doc_tokens.pop(chunk_id, None)
         if tokens is None:

@@ -2,6 +2,42 @@
 
 Running log of build sessions. Newest first.
 
+## 2026-07-06 (M3) — security spine: auth, tenant isolation, PII, crypto, erasure
+The milestone that makes multi-user deployment safe. All controls are OFF by
+default (`EURAG_AUTH_ENABLED` unset) so the local single-user experience is
+byte-for-byte unchanged — turning them on is opt-in.
+- **Auth** (`core/security/auth.py`): HS256 JWTs, 15-min access tokens, refresh
+  tokens single-use (jti tracked, revoked on use → stolen refresh dies on
+  reuse). scrypt passwords. First registered user = admin, rest = user.
+- **Tenant isolation**: the kill-shot risk for a compliance product, so it's
+  enforced in exactly one place — `api/deps.py::allowed_tenants` derives the
+  readable set, `Registry.get_chunks(ids, tenants)` is the hard gate. Even an
+  attacker who knows another tenant's chunk id gets [] back. Vector store
+  filters by tenant server-side as a second layer; BM25 stays global but its
+  foreign candidates die at the gate. Three adversarial tests.
+- **PII gate** (`core/security/pii.py`): scans uploads BEFORE chunk/embed,
+  REJECTS (doesn't silently redact — the uploader owns the fix), exempts
+  official sources. Regex/Luhn default (email/phone/IBAN/card), Presidio
+  optional. Findings are masked in the error, never echoed in full.
+- **At-rest encryption** (`core/security/crypto.py`): AES-256-GCM of chunk
+  text when EURAG_ENCRYPTION_KEY set, transparent at the registry boundary,
+  version-prefixed so plaintext+encrypted rows coexist. Verified: with the
+  key set, the plaintext never appears in the raw sqlite bytes.
+- **Audit log**: append-only via SQLite triggers (UPDATE/DELETE raise).
+  Query text stored as SHA-256 hash — queries can contain PII and erasure
+  must never require editing the trail.
+- **GDPR Art. 17 erasure**: per-document (owner or admin) and per-tenant
+  (admin, account deletion) — deletes registry rows + vector points + live
+  BM25 entries; idempotent; audited.
+- New deps: pyjwt, cryptography. Registry schema gained tenant columns
+  (from-scratch reseed required; done). New routes: /auth/*, /admin/*,
+  DELETE /documents/{id}. 141 tests (was 104): +37 security incl. adversarial
+  isolation, refresh-reuse, audit immutability, forged-token rejection,
+  encryption-at-rest, API authz. Verified live (auth on, real key): unauth
+  401 → register admin → cited answer → query audited as a hash.
+- Remaining before production (M6): rate limiting, prompt-injection CI,
+  load testing. Retrieval quality unchanged (M3 touches no ranking).
+
 ## 2026-07-06 (tier 3) — funding portals: EC pages, open calls, 10 countries
 - New shared scraping infrastructure (`data/scrapers/common.py`):
   PoliteFetcher enforces robots.txt per host (incl. crawl-delay),

@@ -1,5 +1,8 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
+
+from api.deps import allowed_tenants, current_principal
+from core.security.auth import Principal, question_hash
 
 router = APIRouter(tags=["query"])
 
@@ -12,6 +15,18 @@ class QueryRequest(BaseModel):
 
 
 @router.post("/query")
-def query(body: QueryRequest, request: Request):
-    result = request.app.state.pipeline.query(body.question, industry=body.industry)
+def query(
+    body: QueryRequest,
+    request: Request,
+    principal: Principal = Depends(current_principal),
+):
+    tenants = allowed_tenants(request, principal)
+    result = request.app.state.pipeline.query(
+        body.question, industry=body.industry, tenants=tenants
+    )
+    if request.app.state.auth_enabled:
+        # log the hash, never the raw question — queries can contain PII
+        request.app.state.auth.audit(
+            principal.username, "query", detail=question_hash(body.question)
+        )
     return result.to_dict()

@@ -27,7 +27,7 @@ class RecordingEmbedder:
 
 
 class _NoVectors:
-    def search(self, vector, k):
+    def search(self, vector, k, tenants=None):
         return []
 
 

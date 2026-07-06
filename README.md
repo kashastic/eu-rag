@@ -7,9 +7,11 @@ a `[N]` citation that resolves to a real passage** with a link to the official
 text on EUR-Lex. If the sources can't support an answer, EURAG says so instead
 of guessing.
 
-> ⚠️ Information, not legal advice. This is a local, single-user research
-> project — don't deploy it multi-user as-is (auth/PII hardening is on the
-> [roadmap](docs/PROJECT_PLAN.md)).
+> ⚠️ Information, not legal advice. Runs local single-user out of the box;
+> multi-user deployment is gated behind the optional security spine
+> (auth, tenant isolation, PII gate, encryption — see
+> [SECURITY.md](docs/SECURITY.md)). Rate limiting and prompt-injection
+> hardening are still on the [roadmap](docs/PROJECT_PLAN.md).
 
 ## What makes it interesting
 
@@ -22,6 +24,11 @@ of guessing.
   everything; only low-confidence answers trigger one retry on a stronger
   model (Claude Opus) over deeper retrieval. You pay Opus prices only for the
   questions that need it.
+- **Multi-user-ready security (optional)** — off by default for local use;
+  flip `EURAG_AUTH_ENABLED=on` for JWT auth, per-user tenant isolation
+  (enforced in one place, adversarially tested), a PII gate that rejects
+  uploads containing personal data before they're embedded, AES-256-GCM
+  at-rest encryption, an append-only audit log, and GDPR Art. 17 erasure.
 - **Hybrid retrieval, measured** — BM25 + multilingual embeddings fused with
   RRF, reordered by a local cross-encoder reranker, capped per-document for
   citation diversity. Every retrieval change ships with before/after numbers
@@ -152,7 +159,7 @@ yourself:
 ```bash
 python -m core.evaluation.harness          # doc_hit@k, MRR, phrase_hit
 python -m infra.scripts.check_links        # every citation URL must resolve
-python -m pytest                           # 104 tests, fully offline
+python -m pytest                           # 141 tests, fully offline
 ```
 
 ## The corpus

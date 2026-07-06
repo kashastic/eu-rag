@@ -79,6 +79,27 @@ class Settings:
     )
     top_k: int = field(default_factory=lambda: int(os.environ.get("EURAG_TOP_K", "6")))
 
+    # --- M3 security spine ---------------------------------------------------
+    # Auth off by default keeps the local single-user story: no tokens, every
+    # request runs as a built-in admin over the public corpus. Turn on to
+    # require JWTs and isolate per-user uploads into private tenants.
+    auth_enabled: bool = field(
+        default_factory=lambda: os.environ.get("EURAG_AUTH_ENABLED", "").lower()
+        in ("1", "true", "yes")
+    )
+    jwt_secret: str | None = field(
+        default_factory=lambda: os.environ.get("EURAG_JWT_SECRET") or None
+    )
+    # 64 hex chars (32 bytes) enables AES-256-GCM at-rest encryption of chunk
+    # text; unset means plaintext (local default).
+    encryption_key: str | None = field(
+        default_factory=lambda: os.environ.get("EURAG_ENCRYPTION_KEY") or None
+    )
+    # PII gate backend for uploads: "regex" (stdlib, default) or "presidio".
+    pii_backend: str = field(
+        default_factory=lambda: os.environ.get("EURAG_PII_BACKEND", "regex")
+    )
+
     @property
     def qdrant_path(self) -> Path:
         return self.data_dir / "qdrant"
@@ -86,6 +107,14 @@ class Settings:
     @property
     def registry_path(self) -> Path:
         return self.data_dir / "registry.sqlite3"
+
+    @property
+    def auth_path(self) -> Path:
+        return self.data_dir / "auth.sqlite3"
+
+    @property
+    def jwt_secret_path(self) -> Path:
+        return self.data_dir / "jwt_secret"
 
 
 def get_settings() -> Settings:

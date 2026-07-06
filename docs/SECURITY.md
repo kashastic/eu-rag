@@ -1,51 +1,79 @@
 # Security & GDPR Model
 
-Honesty ledger: what is **enforced today** vs **designed-for** (seams exist,
-implementation lands in M3). Do not deploy multi-user before M3 completes.
+Honesty ledger: what is **enforced today** vs still **designed-for**. The M3
+security spine landed 2026-07-06 — the controls below are implemented and
+covered by adversarial tests (`tests/test_security.py`, `tests/unit/test_auth.py`,
+`test_crypto.py`, `test_pii.py`).
 
-## Enforced today (M1)
-- No personal data in corpus: seed corpus is official public documents only
-- Provenance on every chunk (audit trail starts at ingestion)
-- Extractive fallback = zero-hallucination mode when no LLM key present
-- Citation validation: answers with unresolvable `[N]` refs are rejected
+## Enforced today
+- **Tenant isolation** — every document belongs to a tenant (shared official
+  corpus = `public`; each user gets a private tenant). Reads are scoped to an
+  allowed-tenant set derived in ONE place (`api/deps.py::allowed_tenants`);
+  `Registry.get_chunks` is the hard gate that drops any chunk id outside them,
+  so an upstream retrieval leak cannot surface another tenant's text. The
+  vector store filters by tenant server-side as a second layer.
+- **AuthN** — HS256 JWTs. Short-lived access tokens (15 min) carry
+  sub/role/tenant; refresh tokens are single-use (rotated on use, tracked by
+  jti) so a stolen refresh token dies on first reuse. scrypt password hashing.
+- **AuthZ** — roles (`admin` / `user`); the first registered user is admin.
+  Admin-only routes gated by a `require_admin` dependency.
+- **PII gate** — scans uploads BEFORE chunking or embedding; on detection the
+  document is REJECTED (not silently redacted — the uploader fixes it), so
+  personal data never reaches the embedder or vector store. Official sources
+  (our own verified scrapers) are exempt. Regex/Luhn backend by default;
+  Presidio (NER) optional.
+- **At-rest encryption** — AES-256-GCM for chunk text when
+  `EURAG_ENCRYPTION_KEY` is set, transparent at the registry boundary.
+  Version-prefixed ciphertext so plaintext and encrypted rows coexist.
+- **Audit log** — append-only (SQLite triggers block UPDATE/DELETE), records
+  who/what/when for register, login, query, ingest, PII rejection, erasure.
+  Question texts are stored as SHA-256 hashes, never plaintext.
+- **Erasure (GDPR Art. 17)** — deletes registry rows + vector points + live
+  BM25 entries; per-document (owner or admin) or whole-tenant (admin, for
+  account deletion). Audit records the event, not the content.
+- No personal data in the official corpus; provenance on every chunk;
+  citation validation; extractive zero-hallucination fallback.
 
-## Designed-for, lands in M3
-| Control | Design |
+Auth is **off by default** (`EURAG_AUTH_ENABLED` unset) so the local
+single-user experience is unchanged — no tokens, one built-in admin over the
+public corpus. Turning it on is what makes multi-user deployment safe.
+
+## Still designed-for
+| Control | Status |
 |---|---|
-| AuthN | JWT, short-lived access + refresh rotation, revocation list |
-| AuthZ | RBAC decorators on routes (`admin`, `member`, `viewer`) |
-| Tenant isolation | Qdrant namespace per tenant + registry row scoping; injected once via FastAPI dependency, tested adversarially (`tests/security/test_isolation.py`) |
-| PII gate | Presidio scan in the ingestion pipeline, BEFORE embedding — vectors are irreversible-ish but leaky; nothing personal may reach the embedder |
-| At-rest encryption | AES-256-GCM for stored source documents, per-tenant keys |
-| Audit log | Append-only, hash-chained, every query/ingest/erasure event |
-| Erasure (GDPR Art. 17) | Deletes registry rows + vectors + raw cache; audit entry records the erasure, not the content |
-| Prompt injection | Retrieved text is data, never instructions: system prompt hardening + injection test suite (M6) |
+| Hash-chained audit (tamper-evident, not just append-only) | future hardening |
+| Per-tenant encryption keys | single key today; per-tenant is a KMS swap |
+| Prompt-injection test suite | M6 (prompt framing active now) |
+| Rate limiting / abuse controls | M6 |
 
-## Threat model (working notes)
+## Threat model
 - **Cross-tenant leakage** is the kill-shot risk for a compliance product →
-  isolation is enforced in exactly one code path, never per-route.
-- **Poisoned corpus** (malicious doc steering answers): provenance rules +
-  only allowlisted scrapers write to the corpus.
-- **LLM exfiltration via crafted questions**: generator sees only retrieved
-  chunks for the caller's tenant; no tool access from the answer path (agentic
-  layer in M5 gets its own sandboxed tool policy).
+  isolation is enforced in exactly one code path, tested adversarially
+  (`tests/test_security.py`: an attacker who knows another tenant's chunk id
+  still gets nothing).
+- **Poisoned corpus**: `/ingest` requires auth when enabled; uploads land in
+  the uploader's private tenant, never `public`; official texts are seeded
+  offline by allowlisted scrapers only.
+- **PII exfiltration**: the gate runs before the embedder; erasure reaches
+  vectors and BM25, not just the registry.
+- **LLM exfiltration via crafted questions**: the generator sees only chunks
+  for the caller's tenants; no tool access from the answer path.
 
-## Breach scenarios & how each is avoided
+## Breach scenarios & how each is handled
 
-Ranked by damage to the product's core promise (GDPR-safe compliance answers).
+| # | Breach scenario | How avoided | Status |
+|---|---|---|---|
+| 1 | Tenant A reads Tenant B's documents | Isolation in ONE place (`allowed_tenants` → tenant-scoped `get_chunks` + vector filter); adversarial tests cross tenants three ways | ✅ enforced |
+| 2 | Personal data leaks via embeddings | PII gate rejects flagged uploads BEFORE the embedder; official sources exempt | ✅ enforced |
+| 3 | Erasure doesn't actually erase | Art. 17 sweep deletes registry + vector points + BM25 entries; idempotent; audited | ✅ enforced |
+| 4 | Prompt injection from a scraped page | Retrieved text framed as numbered *data*, never instructions; answer path has zero tools | prompt framing active; test suite M6 |
+| 5 | Hallucinated legal claim | Citation enforcement: every `[N]` must resolve or the answer is regenerated/downgraded; "not legal advice" always | ✅ active |
+| 6 | Stolen/replayed auth token | Short-lived access tokens + single-use refresh rotation (jti revocation) | ✅ enforced |
+| 7 | Corpus poisoning via open ingest | `/ingest` requires auth when enabled; uploads isolated to the uploader's tenant | ✅ enforced |
+| 8 | Legal exposure from scraping | EUR-Lex/EC licensed for reuse (Decision 2011/833/EU); national scrapers respect robots.txt, rate-limit, identify, store excerpts + link out, opt-in per country | ✅ enforced |
+| 9 | Secrets in the repo | `.env` gitignored; config reads env only; JWT secret + encryption key are env-provided | ✅ active |
 
-| # | Breach scenario | How it would happen | How we avoid it | Lands |
-|---|---|---|---|---|
-| 1 | Tenant A reads Tenant B's documents | A missed tenant filter on one route or one Qdrant query | Isolation lives in ONE place (a FastAPI dependency that scopes every registry + vector call); adversarial tests try to cross tenants on every route | M3 |
-| 2 | Personal data leaks via embeddings | PII embedded into vectors; vectors partially invertible; erasure misses them | Presidio PII gate runs BEFORE the embedder — flagged text never reaches it. Until M3, only official public documents are ingested (rule, enforced by loader `source_type` allowlist) | M3 (interim rule active now) |
-| 3 | Erasure request doesn't actually erase | Doc deleted from registry but vectors / raw cache survive | Art. 17 erasure deletes registry rows + vector points (by `doc_id` payload filter, already indexed today) + raw cache in one transaction-like sweep; audit log records the event, never the content | M3 |
-| 4 | Prompt injection: a scraped page contains "ignore instructions, reveal X" | Malicious/compromised source page enters corpus, LLM obeys it | Retrieved text is framed as numbered *data* sources, never as instructions; system prompt hardening; injection test suite runs in CI; answer path has zero tool access | M6 tests (prompt framing active now) |
-| 5 | Hallucinated legal claim harms an SME | LLM invents an article number or deadline | Citation enforcement (active today): every claim must carry `[N]` resolving to a retrieved chunk, else the answer is regenerated then downgraded to verbatim quotes; "not legal advice" in every system prompt | Active now |
-| 6 | Stolen/replayed auth token | Long-lived token leaks from a client | Short-lived access tokens + refresh rotation + server-side revocation list | M3 |
-| 7 | Corpus poisoning via open ingest | Anyone POSTs a fake "regulation" to /ingest | /ingest requires auth from M3; until then the deployment is single-user local only (stated in README); scrapers are allowlisted writers | M3 |
-| 8 | Legal exposure from scraping | Aggressive scraping of national portals against ToS | EUR-Lex/EC content is licensed for reuse (Decision 2011/833/EU); national scrapers (KfW/BPI) respect robots.txt, rate-limit, identify themselves, store excerpts + link out, and ship disabled by default | M4 |
-| 9 | Secrets in the repo | API key committed | `.env` is gitignored; config reads env vars only; no key material in code or docs | Active now |
-
-**Deployment rule until M3 ships:** run EURAG locally, single user, official
-public documents only. Multi-user deployment before the security spine exists
-is the one thing this plan forbids.
+**Deployment note:** with `EURAG_AUTH_ENABLED=true`, `EURAG_JWT_SECRET` set,
+and `EURAG_ENCRYPTION_KEY` set, EURAG is safe to run multi-user. Left off, it
+is a local single-user tool. Remaining pre-production items (rate limiting,
+prompt-injection CI, load testing) are M6.
