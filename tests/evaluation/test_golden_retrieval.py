@@ -13,7 +13,7 @@ they skip rather than fail when their document is absent.
 
 import pytest
 
-from core.evaluation.golden import CASES
+from core.evaluation.golden import CASES, marker_present
 from core.evaluation.harness import evaluate, evaluate_case
 
 CORE = [c for c in CASES if c.core]
@@ -37,9 +37,10 @@ def test_expected_document_is_retrieved(seeded_pipeline, case):
 @pytest.mark.parametrize("case", EXTENDED, ids=_ids(EXTENDED))
 def test_extended_corpus_document_is_retrieved(seeded_pipeline, case):
     titles = [d["title"].lower() for d in seeded_pipeline.registry.list_documents()]
-    if not any(case.doc_marker.lower() in title for title in titles):
+    needed = set(case.requires_all) | {case.doc_marker}
+    if not all(marker_present(m, titles) for m in needed):
         pytest.skip(
-            f"'{case.doc_marker}' not in corpus — run: python -m data.scrapers.eurlex"
+            f"'{case.doc_marker}' not in corpus — run the data.scrapers pulls"
         )
     result = evaluate_case(seeded_pipeline, case, k=6)
     assert result.doc_hit, (

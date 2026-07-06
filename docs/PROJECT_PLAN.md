@@ -43,11 +43,16 @@ company?" → cited answer in the browser.
 - AES-256-GCM at-rest encryption for source documents
 - Append-only audit log; GDPR Art. 17 erasure (registry + vectors + audit trail)
 
-## M4 — Data at scale
-- EUR-Lex scraper (GDPR + top 50 regulations, CELLAR/HTML)
-- EC SME portal scraper; national schemes: Germany (KfW), France (BPI)
-- PDF/DOCX loaders; incremental re-ingestion (content hashing)
-- Postgres + Qdrant server via Docker Compose
+## M4 — Data at scale (mostly done early, alongside M2)
+- [x] EUR-Lex scraper — 31 acts, title-verified (`data/scrapers/eurlex.py`)
+- [x] EC SME portal scraper (3 pages) + Funding & Tenders open-calls
+      snapshot via SEDIA API (`data/scrapers/portals.py`, `funding_calls.py`)
+- [x] National schemes: 10 countries pulled (KfW, RVO, ICO, aws, Enterprise
+      Ireland, SNCI, EIFO, Almi, Business Finland, Invitalia) — excerpt +
+      link-out policy, robots-enforced. Bpifrance/VLAIO blocked (403).
+- [x] Incremental re-ingestion via content hashing
+- [ ] PDF/DOCX loaders
+- [ ] Postgres + Qdrant server via Docker Compose
 
 ## M5 — Agentic layer + real frontend
 - LangGraph freshness orchestrator: detect stale/temporal questions → live

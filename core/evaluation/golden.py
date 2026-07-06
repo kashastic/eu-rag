@@ -17,6 +17,15 @@ document is absent instead of failing a fresh clone.
 from dataclasses import dataclass
 
 
+def marker_present(marker: str, titles: list[str]) -> bool:
+    """True when any alternative ("A|B") of the marker appears in a title."""
+    return any(
+        alt.strip().lower() in title
+        for alt in marker.split("|")
+        for title in titles
+    )
+
+
 @dataclass(frozen=True)
 class GoldenCase:
     question: str
@@ -62,7 +71,8 @@ CASES: list[GoldenCase] = [
     ),
     GoldenCase(
         "What is the Enterprise Europe Network?",
-        "EU funding",
+        # sample overview on a fresh clone; real EC portal pages once pulled
+        "EU funding|EC portal",
         ("enterprise europe network",),
     ),
     GoldenCase(
@@ -154,6 +164,31 @@ CASES: list[GoldenCase] = [
         "Pay Transparency",
         # Art. 5 (applicants) or Art. 7 (employees) both answer this
         ("initial pay or its range", "right to information"),
+        core=False,
+    ),
+    # --- Tier 3: funding portals (2026-07-06) -------------------------------
+    GoldenCase(
+        "How can an SME get EU funding or access to finance?",
+        "EC portal",
+        ("access to finance",),
+        core=False,
+    ),
+    GoldenCase(
+        "Which currently open EU funding calls are relevant for SMEs?",
+        "Funding & Tenders",
+        ("deadline",),
+        core=False,
+    ),
+    GoldenCase(
+        "What loans does Almi offer to Swedish companies?",
+        "Almi",
+        ("loans",),
+        core=False,
+    ),
+    GoldenCase(
+        "Which Dutch agency helps entrepreneurs with subsidies and financing?",
+        "RVO",
+        ("netherlands enterprise agency",),
         core=False,
     ),
     # --- compound questions (multi-hop; decomposition target) ---------------

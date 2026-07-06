@@ -26,10 +26,11 @@ of guessing.
   RRF, reordered by a local cross-encoder reranker, capped per-document for
   citation diversity. Every retrieval change ships with before/after numbers
   from the built-in eval harness (currently: doc_hit 100%, MRR 1.00,
-  phrase_hit 92%, compound_hit 100% over 25 golden questions).
-- **Verified corpus** — 31 EU acts pulled from EUR-Lex with title
-  verification (a wrong CELEX id can't silently ingest the wrong law) and
-  link checking (citations must never 404).
+  phrase_hit 93%, compound_hit 100% over 29 golden questions).
+- **Verified corpus** — 31 EU acts from EUR-Lex plus EC portal pages, a
+  live snapshot of open EU funding calls, and 10 national funding agencies —
+  every page title-verified before ingestion (a wrong CELEX id can't
+  silently ingest the wrong law) and link-checked (citations must never 404).
 - **Works without an API key** — no key → extractive mode: answers are
   verbatim quotes from the retrieved passages. Zero hallucination risk,
   still cited.
@@ -151,7 +152,7 @@ yourself:
 ```bash
 python -m core.evaluation.harness          # doc_hit@k, MRR, phrase_hit
 python -m infra.scripts.check_links        # every citation URL must resolve
-python -m pytest                           # 92 tests, fully offline
+python -m pytest                           # 104 tests, fully offline
 ```
 
 ## The corpus
@@ -161,8 +162,11 @@ P2B, e-Commerce, DSM copyright, trade secrets, SME definition, late payment,
 consumer rights, UCPD, unfair contract terms, sale of goods, digital content,
 geo-blocking, product safety, product liability, services, working time,
 transparent working conditions, pay transparency, VAT, VAT small-enterprise
-scheme, CSRD, whistleblower protection, accessibility) plus curated EU/national
-funding overviews. Registry with licensing status:
+scheme, CSRD, whistleblower protection, accessibility), EC SME-portal pages,
+a refreshable snapshot of open Funding & Tenders grant calls, and one key
+page per national funding agency (KfW, RVO, ICO, aws, Enterprise Ireland,
+SNCI, EIFO, Almi, Business Finland, Invitalia — excerpts with link-out,
+robots.txt enforced). Registry with licensing status:
 [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md).
 
 EU legal texts are © European Union, reused under

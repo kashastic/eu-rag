@@ -13,6 +13,7 @@ from pathlib import Path
 
 from core.ingestion.document_loader import load_sample_file
 from core.pipeline import Pipeline
+from data.scrapers import funding_calls, portals
 from data.scrapers.eurlex import load_cached_documents
 
 SAMPLES_DIR = Path(__file__).resolve().parent / "samples"
@@ -35,6 +36,13 @@ def seed(pipeline: Pipeline) -> list[tuple[str, int]]:
     for celex in sorted(eurlex_docs):
         doc = eurlex_docs[celex]
         results.append((doc.title, pipeline.ingest(doc)))
+    portal_docs = portals.load_cached_documents()
+    for key in sorted(portal_docs):
+        doc = portal_docs[key]
+        results.append((doc.title, pipeline.ingest(doc)))
+    calls_doc = funding_calls.load_cached_document()
+    if calls_doc is not None:
+        results.append((calls_doc.title, pipeline.ingest(calls_doc)))
     return results
 
 

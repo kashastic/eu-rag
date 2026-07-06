@@ -17,7 +17,6 @@ EU legal texts are free to reuse with attribution (Decision 2011/833/EU).
 
 import argparse
 import logging
-import ssl
 import time
 import urllib.error
 import urllib.request
@@ -254,16 +253,7 @@ SHORTLIST: list[ShortlistEntry] = [
     ),
 ]
 
-def _ssl_context() -> ssl.SSLContext:
-    """macOS Python installs often lack a CA bundle; use certifi's when
-    available (it ships with our httpx/anthropic deps)."""
-    try:
-        import certifi
-
-        return ssl.create_default_context(cafile=certifi.where())
-    except ImportError:
-        return ssl.create_default_context()
-
+from data.scrapers.common import ssl_context as _ssl_context  # noqa: E402
 
 _last_request = 0.0
 

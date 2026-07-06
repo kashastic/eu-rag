@@ -8,6 +8,12 @@ before ingesting (a wrong CELEX silently fetches the wrong law).
 > below resolved and passed title verification (`data/scrapers/eurlex.py`).
 > Tier 3 is on hold pending the country/industry question (rule 6).
 >
+> **Status 2026-07-06 (tier 3):** EC portal pages (3), Funding & Tenders
+> open-calls snapshot, and 10 of 12 national agencies pulled
+> (`data/scrapers/portals.py`, `data/scrapers/funding_calls.py`).
+> Bpifrance and VLAIO are bot-walled (403) — headline facts stay covered by
+> the curated samples.
+>
 > **Status 2026-07-06:** second wave added — 15 more horizontal acts (see
 > tables below). Chosen horizontal because the industries question is still
 > open: e-commerce & consumer contract law, employment basics, services,

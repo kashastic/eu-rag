@@ -7,10 +7,10 @@ it has a row here with licensing checked.
 |---|---|---|---|---|
 | Bundled excerpts (`data/samples/`) | curated text | Horizon/KfW/BPI funding summaries (GDPR + SME definition excerpts retired — superseded by full EUR-Lex texts) | © EU, reuse permitted with attribution (Decision 2011/833/EU) | ✅ shipped (M1 seed); 2 of 4 files retired 2026-07-05 |
 | EUR-Lex | HTML (`data/scrapers/eurlex.py`) | 31 full acts: tiers 1–2 (GDPR, AI Act, DSA, DMA, NIS2, Data Act, ePrivacy, P2B, SME definition, late payment, consumer rights, GPSR, VAT, CSRD, whistleblower, accessibility) + second wave 2026-07-06 (CRA, e-Commerce, DSM copyright, trade secrets, UCPD, unfair contract terms, sale of goods, digital content, geo-blocking, product liability, services, working time, transparent working conditions, pay transparency, VAT small-enterprise scheme) | EU legal texts: free reuse with attribution (Decision 2011/833/EU) | ✅ pulled + title-verified, cached in `data/raw/eurlex/` |
-| EC SME portal (single-market-economy.ec.europa.eu) | HTML | SME definition, funding programmes, guides | © EU, reuse permitted | M4 scraper |
-| KfW (Germany) | HTML | national SME funding schemes | site ToS — scrape politely, store excerpts + link out | M4 scraper |
-| BPI France | HTML | national SME funding schemes | site ToS — same policy | M4 scraper |
-| National portals, wealthy Western EU (NL RVO, ES ICO/CDTI/ENISA, BE VLAIO+, AT aws, IE Enterprise Ireland/SBCI, LU SNCI, DK EIFO, SE Almi/Vinnova, FI Business Finland/Finnvera, IT Invitalia) | HTML | national SME funding schemes | per-site ToS check pending — same excerpt+link-out policy | candidate (countries user-approved 2026-07-05) |
+| EC SME portal (single-market-economy.ec.europa.eu) | HTML (`data/scrapers/portals.py`) | access to finance, SME strategy, SME policy overview (3 pages, full text) | © EU, reuse permitted | ✅ pulled 2026-07-06 |
+| Funding & Tenders portal | SEDIA search API (`data/scrapers/funding_calls.py`) | snapshot of open/forthcoming SME-relevant grant calls (title, identifier, deadline, link); re-run to refresh | © EU, reuse permitted | ✅ pulled 2026-07-06 (time-sensitive — snapshot date embedded) |
+| National portals (10 countries: DE KfW, NL RVO, ES ICO, AT aws, IE Enterprise Ireland, LU SNCI, DK EIFO, SE Almi, FI Business Finland, IT Invitalia) | HTML (`data/scrapers/portals.py`, opt-in `--country`) | one key SME-funding page per agency, **excerpt (≤1,200 words) + link out**, robots.txt enforced per host | per-site ToS — polite-scraping policy | ✅ pulled 2026-07-06 |
+| Bpifrance (FR), VLAIO (BE), een.ec.europa.eu | HTML | national schemes / EEN | — | ❌ blocked (HTTP 403 for our UA, 2026-07-06) — headline facts remain covered by curated samples; revisit or find API |
 | Live web (agentic) | search API | freshness checks only | per-result attribution, never stored in corpus | M5 |
 
 ## Rules

@@ -21,7 +21,7 @@ import argparse
 import json
 from dataclasses import asdict, dataclass
 
-from core.evaluation.golden import CASES, GoldenCase
+from core.evaluation.golden import CASES, GoldenCase, marker_present
 from core.pipeline import Pipeline
 
 
@@ -42,18 +42,22 @@ class CaseResult:
 def evaluate_case(pipeline: Pipeline, case: GoldenCase, k: int) -> CaseResult:
     chunk_ids = pipeline.retriever.retrieve(case.question, k=k)
     chunks = pipeline.registry.get_chunks(chunk_ids)
-    marker = case.doc_marker.lower()
+    # "A|B" = alternatives: any of these documents legitimately answers
+    markers = [m.strip().lower() for m in case.doc_marker.split("|")]
+
+    def marked(chunk) -> bool:
+        return any(m in chunk.title.lower() for m in markers)
 
     doc_rank = None
     for rank, chunk in enumerate(chunks, start=1):
-        if marker in chunk.title.lower():
+        if marked(chunk):
             doc_rank = rank
             break
 
     phrase_hit = None
     if case.phrases:
         phrase_hit = any(
-            marker in chunk.title.lower()
+            marked(chunk)
             and any(p.lower() in chunk.text.lower() for p in case.phrases)
             for chunk in chunks
         )
@@ -82,7 +86,7 @@ def evaluate(pipeline: Pipeline, k: int = 6) -> dict:
     for case in CASES:
         needed = set(case.requires_all) | {case.doc_marker}
         if not case.core and not all(
-            any(m.lower() in t for t in corpus_titles) for m in needed
+            marker_present(m, corpus_titles) for m in needed
         ):
             skipped.append(case.question)
             continue

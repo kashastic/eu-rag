@@ -2,6 +2,33 @@
 
 Running log of build sessions. Newest first.
 
+## 2026-07-06 (tier 3) — funding portals: EC pages, open calls, 10 countries
+- New shared scraping infrastructure (`data/scrapers/common.py`):
+  PoliteFetcher enforces robots.txt per host (incl. crawl-delay),
+  rate-limits, caches under data/raw/, identifies with the project UA.
+- `data/scrapers/portals.py` — registry-driven page scraper. EC-official
+  pages pulled by default (full text, Decision 2011/833/EU); national agency
+  pages are opt-in per country (standing rule: disabled by default) and
+  store an EXCERPT (≤1,200 words) + link out, never a full mirror. Every
+  page is phrase-verified and JS-shell-guarded (<100 words extracted → skip).
+- `data/scrapers/funding_calls.py` — Funding & Tenders SEDIA search API
+  (multipart form query; the JSON-body form silently ignores filters).
+  Ingests ONE stable-identity snapshot doc of open/forthcoming SME-relevant
+  grant calls (title, identifier, deadline, topic link) with the snapshot
+  date and a verify-at-source note embedded. Re-running refreshes in place.
+  M5's agentic layer replaces this with live lookups.
+- Pulled: 3 EC pages + KfW (DE), RVO (NL), ICO (ES), aws (AT), Enterprise
+  Ireland (IE), SNCI (LU), EIFO (DK), Almi (SE), Business Finland (FI),
+  Invitalia (IT) + the calls snapshot. **Blocked (HTTP 403): Bpifrance (FR),
+  VLAIO (BE), een.ec.europa.eu** — recorded in DATA_SOURCES; curated samples
+  keep covering the Bpifrance/EEN headline facts.
+- Corpus: 33 → 47 documents. Golden set +4 funding cases (29 total).
+  Harness: doc_hit 100%, MRR 1.00, phrase_hit 93%, compound 100%.
+- Golden markers learned "A|B" alternatives: the EEN question is now
+  legitimately answered by EC portal pages, not just the old sample — the
+  offline test caught that as a "failure" until the expectation was fixed.
+- 104 tests passing.
+
 ## 2026-07-06 (M2 complete) — article-aware chunking, HyDE, decomposition
 Each change measured on the harness (25 golden cases incl. 3 new compound
 questions); merged only what the numbers justified.
