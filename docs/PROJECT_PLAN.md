@@ -65,10 +65,19 @@ company?" → cited answer in the browser.
   web lookup → answer merges corpus + web with distinct citation types
 - Next.js 14 + shadcn/ui + i18n (EN/DE/FR first), login flow, streaming answers
 
-## M6 — Hardening & release
-- Security test suites: prompt injection, tenant isolation
-- Load testing; monitoring; staging/prod deploy workflows
-- v1.0.0 tagged release with self-host docker-compose package
+## M6 — Hardening & release ✅ (2026-07-07)
+- [x] Prompt-injection defense: sources fenced as untrusted data, system
+      prompt hardened; framing tests + a live resistance check
+      (opt-in `EURAG_LIVE_TESTS=1`)
+- [x] Tenant-isolation adversarial suite (landed in M3, `tests/test_security.py`)
+- [x] Rate limiting: per-client token bucket on /query + /ingest (429 +
+      Retry-After); baseline security headers (CSP, nosniff, DENY)
+- [x] Self-host Docker package: multi-stage `Dockerfile` (non-root,
+      healthcheck), `docker-compose.yml`, seed-on-first-boot entrypoint —
+      built and run-verified
+- [x] v1.0.0 tagged release
+- [ ] Load testing + monitoring dashboards — deferred (single-instance; the
+      rate limiter interface is one `allow()` call, Redis swap when scaling)
 
 ## Standing decisions
 - Default LLM: Claude Sonnet via `ANTHROPIC_API_KEY` (abstracted in

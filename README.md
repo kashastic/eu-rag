@@ -28,7 +28,9 @@ of guessing.
   flip `EURAG_AUTH_ENABLED=on` for JWT auth, per-user tenant isolation
   (enforced in one place, adversarially tested), a PII gate that rejects
   uploads containing personal data before they're embedded, AES-256-GCM
-  at-rest encryption, an append-only audit log, and GDPR Art. 17 erasure.
+  at-rest encryption, an append-only audit log, GDPR Art. 17 erasure,
+  per-client rate limiting, and prompt-injection defense (retrieved text
+  is fenced as untrusted data, never instructions).
 - **Hybrid retrieval, measured** — BM25 + multilingual embeddings fused with
   RRF, reordered by a local cross-encoder reranker, capped per-document for
   citation diversity. Every retrieval change ships with before/after numbers
@@ -71,6 +73,19 @@ In a hurry? Skip step 3 and run `python -m data.seed` — you get a tiny
 
 First run downloads two small ONNX models (multilingual embedder ~120 MB,
 reranker ~80 MB); both run locally and cost nothing per query.
+
+## Run with Docker
+
+```bash
+cp .env.example .env          # add ANTHROPIC_API_KEY (optional)
+docker compose up             # → http://localhost:8000
+```
+
+The image is multi-stage, runs as a non-root user, has a healthcheck, and
+seeds the corpus on first boot. State (registry, vectors, auth db) persists in
+a named volume; mount a populated `data/raw/` for the full corpus, otherwise
+the bundled samples are seeded. For multi-user, set `EURAG_AUTH_ENABLED=true`
+and a strong `EURAG_JWT_SECRET` in `.env` before starting.
 
 ## Setting up `.env`
 
@@ -159,7 +174,7 @@ yourself:
 ```bash
 python -m core.evaluation.harness          # doc_hit@k, MRR, phrase_hit
 python -m infra.scripts.check_links        # every citation URL must resolve
-python -m pytest                           # 141 tests, fully offline
+python -m pytest                           # 150 tests, fully offline
 ```
 
 ## The corpus

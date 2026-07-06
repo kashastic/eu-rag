@@ -8,6 +8,8 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from api.middleware.headers import SecurityHeaders
+from api.middleware.ratelimit import RateLimiter
 from api.routes.admin import router as admin_router
 from api.routes.auth import router as auth_router
 from api.routes.documents import router as documents_router
@@ -20,10 +22,15 @@ from core.security.auth import AuthStore, load_or_create_secret
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "frontend" / "static"
+# read once at import: middleware is attached to the app before any request,
+# so its config can't come from the per-request lifespan. Runtime toggles for
+# rate limiting therefore require a process restart (documented in .env).
+_settings = get_settings()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # read fresh (not the import-time singleton) so runtime env is honoured
     settings = get_settings()
     app.state.pipeline = Pipeline(settings)
     app.state.auth_enabled = settings.auth_enabled
@@ -39,6 +46,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="EURAG — EU SME Intelligence Hub", lifespan=lifespan)
+app.add_middleware(SecurityHeaders)
+if _settings.rate_limit_per_min > 0:
+    app.add_middleware(
+        RateLimiter,
+        rate_per_min=_settings.rate_limit_per_min,
+        burst=_settings.rate_limit_burst,
+    )
 app.include_router(query_router)
 app.include_router(ingest_router)
 app.include_router(documents_router)

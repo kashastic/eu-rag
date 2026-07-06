@@ -99,6 +99,13 @@ class Settings:
     pii_backend: str = field(
         default_factory=lambda: os.environ.get("EURAG_PII_BACKEND", "regex")
     )
+    # Rate limit on /query and /ingest, per client (user or IP). 0 disables.
+    rate_limit_per_min: int = field(
+        default_factory=lambda: int(os.environ.get("EURAG_RATE_LIMIT_PER_MIN", "30"))
+    )
+    rate_limit_burst: int = field(
+        default_factory=lambda: int(os.environ.get("EURAG_RATE_LIMIT_BURST", "10"))
+    )
 
     @property
     def qdrant_path(self) -> Path:
