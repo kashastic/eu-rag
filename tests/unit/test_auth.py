@@ -1,4 +1,3 @@
-import sqlite3
 import time
 
 import jwt
@@ -11,7 +10,9 @@ SECRET = "x" * 40  # ≥32 bytes, silences the jwt short-key warning
 
 @pytest.fixture()
 def store(tmp_path):
-    s = AuthStore(tmp_path / "auth.db", SECRET)
+    from core.db import Database
+
+    s = AuthStore(Database(None, sqlite_path=tmp_path / "eurag.db"), SECRET)
     yield s
     s.close()
 
@@ -91,13 +92,14 @@ def test_token_signed_with_other_secret_rejected(store):
         store.verify_access(forged)
 
 
-def test_audit_is_append_only(store):
+def test_audit_appends_and_exposes_no_mutation(store):
     store.audit("alice", "query", detail="abc123")
-    assert store.audit_entries()[0]["action"] == "query"
-    with pytest.raises(sqlite3.IntegrityError):
-        store._conn.execute("DELETE FROM audit")
-    with pytest.raises(sqlite3.IntegrityError):
-        store._conn.execute("UPDATE audit SET action = 'x'")
+    store.audit("alice", "auth.login")
+    actions = [e["action"] for e in store.audit_entries()]
+    assert actions == ["auth.login", "query"]  # newest first, both retained
+    # append-only by discipline: the store offers no update/delete for audit
+    assert not hasattr(store, "delete_audit")
+    assert not hasattr(store, "update_audit")
 
 
 def test_question_hash_is_not_reversible():

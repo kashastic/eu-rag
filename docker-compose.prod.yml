@@ -1,0 +1,78 @@
+# Production stack — multi-instance ready. `docker compose -f docker-compose.prod.yml up`
+#
+# Shared state lives in Postgres (users, refresh tokens, audit, chat history),
+# Qdrant (vectors), and Redis (rate-limit buckets), so the `api` service can be
+# scaled to N replicas behind Caddy without any per-instance state. Caddy serves
+# the Next.js app and the API on ONE origin (no CORS), routing API paths to the
+# backend and everything else to the web app.
+#
+# Set the secrets in a .env file next to this compose (see .env.example):
+#   POSTGRES_PASSWORD, EURAG_JWT_SECRET (openssl rand -hex 32),
+#   EURAG_ENCRYPTION_KEY (openssl rand -hex 32), ANTHROPIC_API_KEY
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: eurag
+      POSTGRES_USER: eurag
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "eurag"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    volumes: [qdrant:/qdrant/storage]
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  api:
+    build: .
+    image: eurag-api:latest
+    environment:
+      EURAG_AUTH_ENABLED: "true"
+      EURAG_JWT_SECRET: ${EURAG_JWT_SECRET}
+      EURAG_ENCRYPTION_KEY: ${EURAG_ENCRYPTION_KEY}
+      EURAG_DATABASE_URL: postgresql://eurag:${POSTGRES_PASSWORD}@postgres:5432/eurag
+      QDRANT_URL: http://qdrant:6333
+      EURAG_REDIS_URL: redis://redis:6379/0
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    volumes:
+      - ./data/raw:/app/data/raw   # corpus cache (seed target on first boot)
+    depends_on:
+      postgres: { condition: service_healthy }
+      qdrant: { condition: service_started }
+      redis: { condition: service_started }
+    deploy:
+      replicas: 2   # scale freely — all state is shared
+    restart: unless-stopped
+
+  web:
+    build: ./frontend/web
+    image: eurag-web:latest
+    environment:
+      NEXT_PUBLIC_API_URL: ""   # same-origin behind Caddy
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [api, web]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  qdrant:
+  caddy_data:
+  caddy_config:

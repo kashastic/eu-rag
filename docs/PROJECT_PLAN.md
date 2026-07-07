@@ -60,10 +60,23 @@ company?" → cited answer in the browser.
 - [ ] PDF/DOCX loaders
 - [ ] Postgres + Qdrant server via Docker Compose
 
-## M5 — Agentic layer + real frontend
-- LangGraph freshness orchestrator: detect stale/temporal questions → live
-  web lookup → answer merges corpus + web with distinct citation types
-- Next.js 14 + shadcn/ui + i18n (EN/DE/FR first), login flow, streaming answers
+## M5 — Real frontend + multi-instance ✅ (2026-07-07)
+- [x] Next.js production web app (`frontend/web/`): accounts (register/login,
+      JWT with transparent refresh), sidebar with new-chat / saved chats /
+      rename / delete, chat pane with markdown answers, clickable citation
+      footnotes, industry context. Verified end-to-end in a browser.
+- [x] Saved chats backend: `core/conversations.py` + `/conversations*` routes,
+      user-scoped, on the shared DB.
+- [x] Multi-instance data layer (`core/db.py`): auth + conversations run on
+      shared Postgres (`EURAG_DATABASE_URL`); Postgres parity tested. Rate
+      limiting on shared Redis (`EURAG_REDIS_URL`); vectors on Qdrant server.
+- [x] Production stack: `docker-compose.prod.yml` (Postgres + Qdrant + Redis
+      + N API replicas + web + Caddy single-origin proxy), `docs/DEPLOY.md`.
+- [ ] LangGraph freshness orchestrator (live web lookup for temporal
+      questions) — deferred to a future milestone.
+- [ ] Document-registry port to Postgres for cross-instance upload
+      consistency — the one documented multi-instance boundary (DEPLOY.md).
+- [ ] i18n (DE/FR UI), streaming answers — future polish.
 
 ## M6 — Hardening & release ✅ (2026-07-07)
 - [x] Prompt-injection defense: sources fenced as untrusted data, system

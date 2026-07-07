@@ -40,6 +40,11 @@ of guessing.
   live snapshot of open EU funding calls, and 10 national funding agencies —
   every page title-verified before ingestion (a wrong CELEX id can't
   silently ingest the wrong law) and link-checked (citations must never 404).
+- **Production web app** — a Next.js frontend (`frontend/web/`) with
+  accounts, saved chats (new chat, history, rename, delete), and cited
+  answers. The backend runs multi-instance: Postgres for users/sessions/
+  chat history, Redis for rate limits, Qdrant server for vectors, behind a
+  single-origin Caddy proxy. See [DEPLOY.md](docs/DEPLOY.md).
 - **Works without an API key** — no key → extractive mode: answers are
   verbatim quotes from the retrieved passages. Zero hallucination risk,
   still cited.
@@ -85,7 +90,9 @@ The image is multi-stage, runs as a non-root user, has a healthcheck, and
 seeds the corpus on first boot. State (registry, vectors, auth db) persists in
 a named volume; mount a populated `data/raw/` for the full corpus, otherwise
 the bundled samples are seeded. For multi-user, set `EURAG_AUTH_ENABLED=true`
-and a strong `EURAG_JWT_SECRET` in `.env` before starting.
+and a strong `EURAG_JWT_SECRET` in `.env` before starting. For the full
+horizontally-scalable stack (Postgres + Redis + Qdrant + web + reverse
+proxy), see [docs/DEPLOY.md](docs/DEPLOY.md) and `docker-compose.prod.yml`.
 
 ## Setting up `.env`
 
@@ -174,7 +181,7 @@ yourself:
 ```bash
 python -m core.evaluation.harness          # doc_hit@k, MRR, phrase_hit
 python -m infra.scripts.check_links        # every citation URL must resolve
-python -m pytest                           # 150 tests, fully offline
+python -m pytest                           # 157 tests, fully offline
 ```
 
 ## The corpus

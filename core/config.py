@@ -106,6 +106,20 @@ class Settings:
     rate_limit_burst: int = field(
         default_factory=lambda: int(os.environ.get("EURAG_RATE_LIMIT_BURST", "10"))
     )
+    # Redis URL for a shared rate-limit bucket across instances. Unset = the
+    # in-process limiter (correct only for a single instance).
+    redis_url: str | None = field(
+        default_factory=lambda: os.environ.get("EURAG_REDIS_URL") or None
+    )
+    # CORS allowed origins (comma-separated) for a split frontend/API deploy.
+    # Empty = same-origin only (frontend served behind the same host).
+    cors_origins: tuple = field(
+        default_factory=lambda: tuple(
+            o.strip()
+            for o in os.environ.get("EURAG_CORS_ORIGINS", "").split(",")
+            if o.strip()
+        )
+    )
 
     @property
     def qdrant_path(self) -> Path:

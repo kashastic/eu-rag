@@ -2,6 +2,42 @@
 
 Running log of build sessions. Newest first.
 
+## 2026-07-07 (M5) — Next.js app, saved chats, multi-instance backend
+The production frontend + the persistence changes that make horizontal
+scaling correct.
+- **Next.js web app** (`frontend/web/`, App Router, React 19, no heavy UI
+  deps — hand-styled in the Official Journal aesthetic): login/register with
+  JWT + transparent refresh-on-401, a sidebar (new chat, saved-chat list,
+  rename, delete), a chat pane rendering markdown answers with clickable
+  citation footnotes and mode/escalated/insufficient flags, optional industry
+  context. `npm run build` clean; verified live end-to-end in a browser
+  (register → ask → GDPR answer citing Art. 37/39 → chat auto-titled and
+  saved → survives reload → reopens full history from the server).
+- **Saved chats backend**: `core/conversations.py` (create/list/get/append/
+  rename/delete/erase, user-scoped, citations stored as JSON) + `/conversations*`
+  routes; the ask-within-chat route runs the pipeline and persists both turns.
+- **Multi-instance data layer** (`core/db.py`): a dialect-aware DB (SQLite
+  local, Postgres via `EURAG_DATABASE_URL`). Ported auth + conversations onto
+  it so users, refresh-token revocation, audit, and chat history are shared
+  across every API instance. **Verified against a real Postgres** (docker):
+  roles, single-use refresh, isolation, audit all identical — captured as
+  opt-in `tests/test_postgres.py` (`EURAG_TEST_DATABASE_URL`).
+- **Shared rate limiting**: `api/middleware/ratelimit.py` gained a Redis
+  backend (atomic Lua token bucket, keys hashed) via `EURAG_REDIS_URL`; falls
+  back to in-process, and fails open if the limiter errors.
+- **CORS** (`EURAG_CORS_ORIGINS`) for split frontend/API dev.
+- **Production stack**: `docker-compose.prod.yml` (Postgres + Qdrant + Redis +
+  2 API replicas + web + Caddy single-origin proxy → no CORS, auto-HTTPS),
+  web `Dockerfile` (Next standalone, non-root), `docs/DEPLOY.md`.
+- Honest boundary documented: the official read-only corpus is replicated
+  per-instance (reads correct everywhere); user-upload registry-on-Postgres is
+  the one remaining port for cross-instance upload consistency (`core/db.py`
+  makes it a driver swap). Auth port bug fixed on the way: dropped the
+  SQLite-only audit triggers for app-layer append-only (portable to Postgres).
+- Auth store rewritten onto the DB layer (was raw sqlite3); its test updated
+  for the constructor + append-only-by-discipline. 157 tests + 2 Postgres
+  parity (opt-in). M1–M6 done; M5 frontend + multi-instance shipped.
+
 ## 2026-07-07 (M6) — hardening & release: injection defense, rate limit, Docker, v1.0.0
 - **Prompt-injection defense**: the answerer now fences retrieved text between
   BEGIN/END SOURCES markers and the system prompt states plainly that anything

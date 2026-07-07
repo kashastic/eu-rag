@@ -1,16 +1,18 @@
-"""In-process token-bucket rate limiter.
+"""Token-bucket rate limiter for the expensive routes (/query calls the LLM
+and can escalate to Opus; /ingest embeds).
 
-Protects the expensive, abusable routes (/query calls the LLM and can trigger
-an Opus escalation; /ingest embeds) from a single client draining the API
-budget. Keyed by authenticated username when a valid-looking bearer token is
-present, else by client IP — so one logged-in user can't spend another's
-budget and an anonymous flood is capped per source.
+Two backends, chosen by whether a Redis client is supplied:
+- **Redis** (production, multi-instance): the bucket lives in Redis so a
+  client's limit is shared across every app instance behind the load
+  balancer. Refill + take is one atomic Lua script.
+- **In-process** (single instance / local): a per-process dict of buckets.
 
-In-process is honest for a single-instance deployment; a multi-instance
-deployment behind a load balancer should move this to Redis (the interface is
-one `allow()` call, so that swap is local). Disabled when rate == 0.
+Keyed by bearer token when present else client IP, so one user can't spend
+another's budget. Keys are hashed before hitting Redis (never store raw
+tokens). Disabled when rate == 0.
 """
 
+import hashlib
 import time
 from collections import OrderedDict
 
@@ -18,12 +20,28 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-# only the routes that cost money / compute; reads and auth are unmetered
 _LIMITED_PATHS = ("/query", "/ingest")
-_MAX_BUCKETS = 10_000  # cap memory; oldest keys evicted
+_MAX_BUCKETS = 10_000
+
+# atomic refill-and-take; KEYS[1]=bucket, ARGV=rate, capacity, now, ttl
+_REDIS_LUA = """
+local b = redis.call('HMGET', KEYS[1], 'tokens', 'ts')
+local tokens = tonumber(b[1])
+local ts = tonumber(b[2])
+local rate = tonumber(ARGV[1])
+local cap = tonumber(ARGV[2])
+local now = tonumber(ARGV[3])
+if tokens == nil then tokens = cap; ts = now end
+tokens = math.min(cap, tokens + (now - ts) * rate)
+local allowed = 0
+if tokens >= 1 then tokens = tokens - 1; allowed = 1 end
+redis.call('HMSET', KEYS[1], 'tokens', tokens, 'ts', now)
+redis.call('EXPIRE', KEYS[1], tonumber(ARGV[4]))
+return {allowed, tostring(tokens)}
+"""
 
 
-class TokenBucket:
+class _Bucket:
     __slots__ = ("tokens", "updated")
 
     def __init__(self, capacity: float):
@@ -32,45 +50,62 @@ class TokenBucket:
 
 
 class RateLimiter(BaseHTTPMiddleware):
-    def __init__(self, app, rate_per_min: int, burst: int):
+    def __init__(self, app, rate_per_min: int, burst: int, redis_client=None):
         super().__init__(app)
-        self.rate = rate_per_min / 60.0  # tokens per second
+        self.rate = rate_per_min / 60.0  # tokens/sec
         self.capacity = float(max(burst, 1))
-        self._buckets: OrderedDict[str, TokenBucket] = OrderedDict()
+        self._redis = redis_client
+        self._sha = None
+        if redis_client is not None:
+            self._sha = redis_client.script_load(_REDIS_LUA)
+        self._buckets: OrderedDict[str, _Bucket] = OrderedDict()
 
     def _key(self, request: Request) -> str:
         auth = request.headers.get("authorization", "")
         if auth.lower().startswith("bearer "):
-            # coarse identity — the token string itself, no verification here;
-            # a forged token still gets rate-limited as its own bucket
-            return "tok:" + auth.split(" ", 1)[1][:32]
-        client = request.client
-        return "ip:" + (client.host if client else "unknown")
+            raw = "tok:" + auth.split(" ", 1)[1]
+        else:
+            client = request.client
+            raw = "ip:" + (client.host if client else "unknown")
+        return "eurag:rl:" + hashlib.sha256(raw.encode()).hexdigest()[:24]
 
-    def _allow(self, key: str) -> tuple[bool, float]:
+    def _allow_redis(self, key: str) -> tuple[bool, float]:
+        allowed, tokens = self._redis.evalsha(
+            self._sha, 1, key, self.rate, self.capacity, time.time(), 3600
+        )
+        tokens = float(tokens)
+        if int(allowed) == 1:
+            return True, 0.0
+        return False, (1.0 - tokens) / self.rate if self.rate else 60.0
+
+    def _allow_local(self, key: str) -> tuple[bool, float]:
         now = time.monotonic()
         bucket = self._buckets.get(key)
         if bucket is None:
             if len(self._buckets) >= _MAX_BUCKETS:
                 self._buckets.popitem(last=False)
-            bucket = TokenBucket(self.capacity)
+            bucket = _Bucket(self.capacity)
             self._buckets[key] = bucket
         else:
-            bucket.tokens = min(
-                self.capacity, bucket.tokens + (now - bucket.updated) * self.rate
-            )
+            bucket.tokens = min(self.capacity, bucket.tokens + (now - bucket.updated) * self.rate)
             bucket.updated = now
             self._buckets.move_to_end(key)
         if bucket.tokens >= 1.0:
             bucket.tokens -= 1.0
             return True, 0.0
-        retry_after = (1.0 - bucket.tokens) / self.rate if self.rate else 60.0
-        return False, retry_after
+        return False, (1.0 - bucket.tokens) / self.rate if self.rate else 60.0
 
     async def dispatch(self, request: Request, call_next):
         if request.url.path not in _LIMITED_PATHS:
             return await call_next(request)
-        allowed, retry_after = self._allow(self._key(request))
+        key = self._key(request)
+        try:
+            allowed, retry_after = (
+                self._allow_redis(key) if self._redis is not None else self._allow_local(key)
+            )
+        except Exception:
+            # never let a limiter outage take down the API — fail open
+            allowed, retry_after = True, 0.0
         if not allowed:
             return JSONResponse(
                 status_code=429,

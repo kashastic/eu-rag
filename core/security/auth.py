@@ -1,28 +1,32 @@
-"""Users, JWTs, and the append-only audit log.
+"""Users, JWTs, and the audit log — on the shared Database.
 
-- Passwords: scrypt (stdlib), per-user random salt.
-- Tokens: HS256 JWTs. Short-lived access tokens carry sub/role/tenant;
-  refresh tokens are single-use (rotated on refresh, revoked on use) and
-  tracked by jti so a stolen refresh token dies on first reuse.
-- Roles: the FIRST registered user becomes "admin", everyone after "user".
-- Tenancy: every user gets a private tenant named after them; the shared
-  official corpus lives in tenant "public" and is readable by everyone.
-- Audit: append-only table (guarded by SQLite triggers) recording who did
-  what, when. Question texts are stored as SHA-256 hashes, not plaintext —
-  queries can themselves contain personal data, and erasure must never
-  require editing the audit trail.
+- Passwords: scrypt (stdlib), per-user random salt, stored as hex.
+- Tokens: HS256 JWTs. Access tokens carry sub/role/tenant and are validated
+  statelessly by any instance sharing EURAG_JWT_SECRET. Refresh tokens are
+  single-use (rotated on refresh, revoked by jti in shared storage) so a
+  stolen refresh token dies on first reuse across the whole fleet.
+- Roles: first registered user is "admin", everyone after "user".
+- Tenancy: each user gets a private tenant; the shared official corpus is
+  tenant "public".
+- Audit: append-only by discipline (the store exposes no update/delete for
+  it). Question texts are stored as SHA-256 hashes, never plaintext.
+
+Running on Postgres (EURAG_DATABASE_URL) makes login, refresh-token
+revocation, and the audit trail consistent across every app instance.
 """
 
 import hashlib
+import hmac
 import logging
 import os
-import sqlite3
 import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
 import jwt
+
+from core.db import Database
 
 logger = logging.getLogger(__name__)
 
@@ -32,30 +36,26 @@ REFRESH_TTL = 7 * 24 * 3600
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     username   TEXT PRIMARY KEY,
-    salt       BLOB NOT NULL,
-    pw_hash    BLOB NOT NULL,
+    salt       TEXT NOT NULL,
+    pw_hash    TEXT NOT NULL,
     role       TEXT NOT NULL,
     tenant     TEXT NOT NULL,
-    created_at REAL NOT NULL
+    created_at DOUBLE PRECISION NOT NULL
 );
 CREATE TABLE IF NOT EXISTS refresh_tokens (
     jti        TEXT PRIMARY KEY,
     username   TEXT NOT NULL,
-    expires_at REAL NOT NULL,
+    expires_at DOUBLE PRECISION NOT NULL,
     revoked    INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS audit (
-    id       INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts       REAL NOT NULL,
+    id       {serial},
+    ts       DOUBLE PRECISION NOT NULL,
     actor    TEXT NOT NULL,
     action   TEXT NOT NULL,
     resource TEXT NOT NULL DEFAULT '',
     detail   TEXT NOT NULL DEFAULT ''
 );
-CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit
-BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END;
-CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit
-BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END;
 """
 
 
@@ -86,7 +86,8 @@ def question_hash(question: str) -> str:
 
 
 def load_or_create_secret(path: Path, env_value: str | None) -> str:
-    """JWT secret from env, else a persisted random one (dev convenience)."""
+    """JWT secret from env (required for multi-instance — the fleet must
+    share it), else a persisted random one for local single-instance dev."""
     if env_value:
         return env_value
     if path.is_file():
@@ -100,12 +101,10 @@ def load_or_create_secret(path: Path, env_value: str | None) -> str:
 
 
 class AuthStore:
-    def __init__(self, path: Path, jwt_secret: str):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.executescript(_SCHEMA)
+    def __init__(self, db: Database, jwt_secret: str):
+        self._db = db
         self._secret = jwt_secret
+        db.executescript(_SCHEMA)
 
     # --- users ---------------------------------------------------------------
 
@@ -115,26 +114,34 @@ class AuthStore:
             raise AuthError("username: 3-40 chars, letters/digits/underscore")
         if len(password) < 10:
             raise AuthError("password must be at least 10 characters")
-        first_user = self._conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
+        if self._db.query_one("SELECT 1 AS x FROM users WHERE username = ?", (username,)):
+            raise AuthError("username already taken")
+        first_user = not self._db.query_one("SELECT 1 AS x FROM users LIMIT 1")
         role = "admin" if first_user else "user"
         salt = os.urandom(16)
-        try:
-            with self._conn:
-                self._conn.execute(
-                    "INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)",
-                    (username, salt, _hash_password(password, salt), role, username, time.time()),
-                )
-        except sqlite3.IntegrityError:
-            raise AuthError("username already taken") from None
+        with self._db.transaction() as tx:
+            tx.execute(
+                "INSERT INTO users (username, salt, pw_hash, role, tenant, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    username,
+                    salt.hex(),
+                    _hash_password(password, salt).hex(),
+                    role,
+                    username,
+                    time.time(),
+                ),
+            )
         self.audit(username, "auth.register", detail=role)
         return Principal(username, role, username)
 
     def authenticate(self, username: str, password: str) -> Principal:
-        row = self._conn.execute(
+        row = self._db.query_one(
             "SELECT * FROM users WHERE username = ?", (username.strip().lower(),)
-        ).fetchone()
-        if row is None or not _constant_eq(
-            _hash_password(password, row["salt"]), row["pw_hash"]
+        )
+        if row is None or not hmac.compare_digest(
+            _hash_password(password, bytes.fromhex(row["salt"])),
+            bytes.fromhex(row["pw_hash"]),
         ):
             self.audit(username, "auth.login_failed")
             raise AuthError("invalid credentials")
@@ -162,8 +169,8 @@ class AuthStore:
             self._secret,
             algorithm="HS256",
         )
-        with self._conn:
-            self._conn.execute(
+        with self._db.transaction() as tx:
+            tx.execute(
                 "INSERT INTO refresh_tokens (jti, username, expires_at) VALUES (?, ?, ?)",
                 (jti, principal.username, now + REFRESH_TTL),
             )
@@ -179,26 +186,27 @@ class AuthStore:
         return Principal(claims["sub"], claims["role"], claims["tenant"])
 
     def refresh(self, token: str) -> dict:
-        """Single-use rotation: the presented refresh token is revoked and a
-        fresh pair issued. A revoked/unknown jti is rejected."""
         try:
             claims = jwt.decode(token, self._secret, algorithms=["HS256"])
         except jwt.InvalidTokenError as exc:
             raise AuthError(f"invalid token: {exc}") from None
         if claims.get("type") != "refresh":
             raise AuthError("not a refresh token")
-        with self._conn:
-            cursor = self._conn.execute(
-                "UPDATE refresh_tokens SET revoked = 1"
-                " WHERE jti = ? AND revoked = 0 AND expires_at > ?",
-                (claims["jti"], time.time()),
-            )
-        if cursor.rowcount != 1:
+        # single-use: the UPDATE flips revoked 0→1 atomically; rowcount==1 only
+        # for the first presenter, so a reused/stolen token gets rowcount 0
+        cur = self._db.execute(
+            "UPDATE refresh_tokens SET revoked = 1"
+            " WHERE jti = ? AND revoked = 0 AND expires_at > ?",
+            (claims["jti"], time.time()),
+        )
+        if not self._db.is_pg:
+            self._db._conn.commit()
+        if cur.rowcount != 1:
             self.audit(claims.get("sub", "?"), "auth.refresh_reuse_blocked")
             raise AuthError("refresh token expired, revoked, or reused")
-        row = self._conn.execute(
+        row = self._db.query_one(
             "SELECT * FROM users WHERE username = ?", (claims["sub"],)
-        ).fetchone()
+        )
         if row is None:
             raise AuthError("user no longer exists")
         self.audit(claims["sub"], "auth.refresh")
@@ -207,23 +215,19 @@ class AuthStore:
     # --- audit ---------------------------------------------------------------
 
     def audit(self, actor: str, action: str, resource: str = "", detail: str = "") -> None:
-        with self._conn:
-            self._conn.execute(
-                "INSERT INTO audit (ts, actor, action, resource, detail) VALUES (?, ?, ?, ?, ?)",
+        with self._db.transaction() as tx:
+            tx.execute(
+                "INSERT INTO audit (ts, actor, action, resource, detail)"
+                " VALUES (?, ?, ?, ?, ?)",
                 (time.time(), actor, action, resource, detail),
             )
 
     def audit_entries(self, limit: int = 100) -> list[dict]:
-        rows = self._conn.execute(
-            "SELECT * FROM audit ORDER BY id DESC LIMIT ?", (limit,)
-        ).fetchall()
-        return [dict(r) for r in rows]
+        return self._db.query(
+            "SELECT id, ts, actor, action, resource, detail FROM audit"
+            " ORDER BY id DESC LIMIT ?",
+            (limit,),
+        )
 
     def close(self) -> None:
-        self._conn.close()
-
-
-def _constant_eq(a: bytes, b: bytes) -> bool:
-    import hmac
-
-    return hmac.compare_digest(a, b)
+        self._db.close()

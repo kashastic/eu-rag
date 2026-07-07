@@ -18,6 +18,12 @@ dev = [
     "pytest>=8",
     "httpx>=0.27",
 ]
+# multi-instance production backends (Postgres + Redis). Installed in the
+# API Docker image; not needed for local single-instance use.
+prod = [
+    "psycopg[binary]>=3.1",
+    "redis>=5",
+]
 
 [tool.setuptools.packages.find]
 include = ["core*", "api*", "data*"]

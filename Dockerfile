@@ -8,7 +8,7 @@ COPY api ./api
 COPY data ./data
 COPY infra ./infra
 COPY frontend ./frontend
-RUN pip install --no-cache-dir --prefix=/install .
+RUN pip install --no-cache-dir --prefix=/install ".[prod]"
 
 FROM python:3.11-slim
 # non-root runtime user

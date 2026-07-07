@@ -198,6 +198,35 @@ def test_users_cannot_see_or_erase_each_others_uploads(auth_client):
     assert auth_client.delete(f"/documents/{alice_doc}", headers=_bearer(alice)).status_code == 200
 
 
+def test_chat_history_flow_and_isolation(auth_client):
+    def user(name):
+        auth_client.post("/auth/register", json={"username": name, "password": "longpassword1"})
+        return auth_client.post(
+            "/auth/login", json={"username": name, "password": "longpassword1"}
+        ).json()["access_token"]
+
+    alice, bob = user("alice"), user("bob")
+    # alice starts a chat and asks a question — both turns persist
+    conv = auth_client.post("/conversations", json={}, headers=_bearer(alice)).json()
+    ask = auth_client.post(
+        f"/conversations/{conv['id']}/messages",
+        json={"question": "What are the SME turnover thresholds?"},
+        headers=_bearer(alice),
+    )
+    assert ask.status_code == 200
+    reopened = auth_client.get(f"/conversations/{conv['id']}", headers=_bearer(alice)).json()
+    assert [m["role"] for m in reopened["messages"]] == ["user", "assistant"]
+    # the chat auto-titled from the first question
+    assert reopened["title"] != "New chat"
+
+    # bob cannot see or open alice's chat
+    assert auth_client.get("/conversations", headers=_bearer(bob)).json()["conversations"] == []
+    assert auth_client.get(f"/conversations/{conv['id']}", headers=_bearer(bob)).status_code == 404
+    assert auth_client.delete(f"/conversations/{conv['id']}", headers=_bearer(bob)).status_code == 404
+    # alice can delete her own
+    assert auth_client.delete(f"/conversations/{conv['id']}", headers=_bearer(alice)).status_code == 200
+
+
 def test_admin_only_audit_log(auth_client):
     def user(name):
         auth_client.post("/auth/register", json={"username": name, "password": "longpassword1"})

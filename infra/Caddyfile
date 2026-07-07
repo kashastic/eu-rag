@@ -1,0 +1,16 @@
+# Single origin for web + API. Set your domain (or :80 for local). With a real
+# domain, Caddy provisions HTTPS automatically.
+{$EURAG_DOMAIN::80} {
+	encode gzip
+
+	# API surface → FastAPI backend (round-robins across api replicas)
+	@api path /query /ingest /healthz /documents/* /auth/* /admin/* /conversations*
+	handle @api {
+		reverse_proxy api:8000
+	}
+
+	# everything else → Next.js app
+	handle {
+		reverse_proxy web:3000
+	}
+}

@@ -34,7 +34,10 @@ def erase_tenant(
     if tenant == "public":
         raise HTTPException(status_code=400, detail="refusing to erase the public corpus")
     n = request.app.state.pipeline.erase_tenant(tenant)
+    chats = 0
+    if request.app.state.conversations is not None:
+        chats = request.app.state.conversations.erase_user(tenant)
     request.app.state.auth.audit(
-        principal.username, "tenant.erase", resource=tenant, detail=str(n)
+        principal.username, "tenant.erase", resource=tenant, detail=f"{n} docs, {chats} chats"
     )
-    return {"tenant": tenant, "documents_erased": n}
+    return {"tenant": tenant, "documents_erased": n, "conversations_erased": chats}
