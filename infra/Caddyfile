@@ -4,7 +4,7 @@
 	encode gzip
 
 	# API surface → FastAPI backend (round-robins across api replicas)
-	@api path /query /ingest /healthz /documents/* /auth/* /admin/* /conversations*
+	@api path /query /ingest /healthz /documents/* /auth/* /admin/* /conversations* /account*
 	handle @api {
 		reverse_proxy api:8000
 	}

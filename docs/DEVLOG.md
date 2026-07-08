@@ -2,6 +2,35 @@
 
 Running log of build sessions. Newest first.
 
+## 2026-07-08 — access tiers: anonymous free questions, login wall, BYOK
+Removed the forced login and added the cost-control model the user specified.
+- **Anonymous tier**: `/query` now works without a token — 3 (configurable)
+  full-quality questions, **counted server-side per IP/day** (`core/quota.py`
+  on the shared DB, so clearing browser state doesn't reset it). Spent → 401
+  `anonymous_limit_reached`. The frontend popup only reflects the server count.
+- **Login wall**: frontend is anonymous-first (`app/chat/page.tsx` reworked to
+  handle anon + authed modes). After the free questions a forced login modal
+  appears; register/login → authed mode with saved chats. "Continue with
+  Google" button is present but disabled (needs a Google OAuth client the owner
+  must create — clean seam left).
+- **Model tiering** (`pipeline.query` gained answer_model/escalation_model/
+  api_key overrides, per-request client cache): anonymous + BYOK get the full
+  Sonnet→Opus cascade; logged-in free tier gets Haiku, no escalation. Local
+  (auth-off) mode is untiered (full cascade), so nothing changed for local dev.
+- **BYOK** (`api/routes/account.py`, `AuthStore.set/get/clear_byok`): a user
+  stores their own Anthropic key, AES-256-GCM encrypted (requires
+  EURAG_ENCRYPTION_KEY); their queries run on their key + full cascade. Verified
+  the raw key never lands in the DB (only `enc1:` ciphertext) and is never
+  returned; `account.byok_set` audited.
+- Verified end-to-end in a browser: 2 free anon answers with citations and a
+  live "N free questions left" counter → 3rd triggers the wall → register →
+  free-tier banner → add key → banner clears (premium). 163 tests + 6 new tier
+  tests (anon gate, per-IP isolation, wall, free/byok tiers, key never leaked).
+- **Note for deploy**: no global $ ceiling by product choice (a genuinely hard
+  question should be allowed to escalate); the residual IP-rotation risk on the
+  3 free full-quality questions is mitigated by Turnstile — seam left, needs the
+  owner's Cloudflare site key. SECURITY.md documents the model.
+
 ## 2026-07-07 (M5) — Next.js app, saved chats, multi-instance backend
 The production frontend + the persistence changes that make horizontal
 scaling correct.

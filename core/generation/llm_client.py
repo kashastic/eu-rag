@@ -19,10 +19,11 @@ class LLMClient(Protocol):
 
 
 class AnthropicClient:
-    def __init__(self, model: str):
+    def __init__(self, model: str, api_key: str | None = None):
         import anthropic
 
-        self._client = anthropic.Anthropic()
+        # api_key set = BYOK (billed to the user); else the server's env key
+        self._client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
         self._model = model
         self.name = f"anthropic:{model}"
 
@@ -46,7 +47,15 @@ class ExtractiveClient:
         raise NotImplementedError("extractive mode is handled by the answerer")
 
 
-def get_llm_client(model: str) -> LLMClient:
+def get_llm_client(model: str, api_key: str | None = None) -> LLMClient:
+    """api_key set = BYOK: always use Anthropic with the user's key. Otherwise
+    fall back to the server key, or extractive mode when none is configured."""
+    if api_key:
+        try:
+            return AnthropicClient(model, api_key=api_key)
+        except Exception as exc:
+            logger.warning("BYOK client failed (%s) — extractive mode", exc)
+            return ExtractiveClient()
     if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
         try:
             return AnthropicClient(model)

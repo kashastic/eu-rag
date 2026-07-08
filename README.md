@@ -40,9 +40,11 @@ of guessing.
   live snapshot of open EU funding calls, and 10 national funding agencies —
   every page title-verified before ingestion (a wrong CELEX id can't
   silently ingest the wrong law) and link-checked (citations must never 404).
-- **Production web app** — a Next.js frontend (`frontend/web/`) with
-  accounts, saved chats (new chat, history, rename, delete), and cited
-  answers. The backend runs multi-instance: Postgres for users/sessions/
+- **Production web app** — a Next.js frontend (`frontend/web/`): try it
+  anonymously (a few free full-quality questions, server-metered), then a
+  login wall; accounts get saved chats (new chat, history, rename, delete).
+  Logged-in free tier runs a cheap model; bring your own Anthropic key
+  (encrypted at rest) to unlock the full cascade on your own bill. The backend runs multi-instance: Postgres for users/sessions/
   chat history, Redis for rate limits, Qdrant server for vectors, behind a
   single-origin Caddy proxy. See [DEPLOY.md](docs/DEPLOY.md).
 - **Works without an API key** — no key → extractive mode: answers are

@@ -35,6 +35,8 @@ class Pipeline:
         )
         self.bm25 = BM25Index()
         self.llm = get_llm_client(self.settings.llm_model)
+        # per-model server-key client cache for request-time tiering
+        self._client_cache = {self.settings.llm_model: self.llm}
         # low-confidence cascade: cheap model answers everything, this one is
         # consulted only when the cheap answer signals insufficiency
         self.escalation_llm = None
@@ -113,24 +115,57 @@ class Pipeline:
             self.erase_document(doc_id)
         return len(doc_ids)
 
+    def _resolve_llm(self, model: str | None, api_key: str | None):
+        """An LLM client for a per-request tier. BYOK clients are built fresh
+        (billed to the user, not cached); server-key clients are cached by
+        model so tiering doesn't rebuild the SDK client every request."""
+        model = model or self.settings.llm_model
+        if api_key:
+            return get_llm_client(model, api_key=api_key)
+        client = self._client_cache.get(model)
+        if client is None:
+            client = get_llm_client(model)
+            self._client_cache[model] = client
+        return client
+
     def query(
         self,
         question: str,
         industry: str | None = None,
         tenants: list[str] | None = None,
+        *,
+        answer_model: str | None = None,
+        escalation_model: str | None = None,
+        api_key: str | None = None,
     ) -> AnswerResult:
-        """`tenants` scopes retrieval; None (the local default) searches
-        everything. A logged-in user passes [their tenant, "public"]."""
+        """`tenants` scopes retrieval. The three model params implement the
+        tiering: anonymous/BYOK get the full Sonnet→Opus cascade; the logged-in
+        free tier passes answer_model=Haiku and escalation_model="none".
+        None on all three preserves the local/default behaviour."""
         if industry:
             # research signal for corpus expansion: which sectors ask questions
             logger.info("query industry context: %s", industry)
+
+        if answer_model or api_key:
+            llm = self._resolve_llm(answer_model, api_key)
+        else:
+            llm = self.llm
+        if escalation_model is not None or api_key:
+            escalation = (
+                None
+                if escalation_model in ("", "none")
+                else self._resolve_llm(escalation_model or self.settings.escalation_model, api_key)
+            )
+        else:
+            escalation = self.escalation_llm
+
         result = self._answer(
-            question, self.llm, k=self.settings.top_k, industry=industry, tenants=tenants
+            question, llm, k=self.settings.top_k, industry=industry, tenants=tenants
         )
         if (
             result.insufficient
             and result.mode != "no_sources"  # empty index — nothing to widen
-            and self.escalation_llm is not None
+            and escalation is not None
         ):
             logger.info(
                 "low-confidence answer — escalating to %s over wider retrieval",
@@ -141,7 +176,7 @@ class Pipeline:
             # answering passage sat below the per-doc cap
             result = self._answer(
                 question,
-                self.escalation_llm,
+                escalation,
                 k=self.settings.escalation_top_k,
                 max_per_doc=6,
                 industry=industry,

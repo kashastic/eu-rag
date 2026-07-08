@@ -35,12 +35,13 @@ REFRESH_TTL = 7 * 24 * 3600
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
-    username   TEXT PRIMARY KEY,
-    salt       TEXT NOT NULL,
-    pw_hash    TEXT NOT NULL,
-    role       TEXT NOT NULL,
-    tenant     TEXT NOT NULL,
-    created_at DOUBLE PRECISION NOT NULL
+    username     TEXT PRIMARY KEY,
+    salt         TEXT NOT NULL,
+    pw_hash      TEXT NOT NULL,
+    role         TEXT NOT NULL,
+    tenant       TEXT NOT NULL,
+    created_at   DOUBLE PRECISION NOT NULL,
+    byok_key_enc TEXT
 );
 CREATE TABLE IF NOT EXISTS refresh_tokens (
     jti        TEXT PRIMARY KEY,
@@ -105,6 +106,13 @@ class AuthStore:
         self._db = db
         self._secret = jwt_secret
         db.executescript(_SCHEMA)
+        # migrate pre-BYOK databases in place
+        try:
+            db.execute("ALTER TABLE users ADD COLUMN byok_key_enc TEXT")
+            if not db.is_pg:
+                db._conn.commit()
+        except Exception:
+            pass  # column already present
 
     # --- users ---------------------------------------------------------------
 
@@ -211,6 +219,27 @@ class AuthStore:
             raise AuthError("user no longer exists")
         self.audit(claims["sub"], "auth.refresh")
         return self.issue_tokens(Principal(row["username"], row["role"], row["tenant"]))
+
+    # --- BYOK (store the already-encrypted blob; crypto happens in the route) --
+
+    def set_byok(self, username: str, encrypted: str) -> None:
+        with self._db.transaction() as tx:
+            tx.execute(
+                "UPDATE users SET byok_key_enc = ? WHERE username = ?",
+                (encrypted, username),
+            )
+
+    def clear_byok(self, username: str) -> None:
+        with self._db.transaction() as tx:
+            tx.execute(
+                "UPDATE users SET byok_key_enc = NULL WHERE username = ?", (username,)
+            )
+
+    def get_byok(self, username: str) -> str | None:
+        row = self._db.query_one(
+            "SELECT byok_key_enc FROM users WHERE username = ?", (username,)
+        )
+        return row["byok_key_enc"] if row else None
 
     # --- audit ---------------------------------------------------------------
 

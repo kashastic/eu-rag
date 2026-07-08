@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from api.middleware.headers import SecurityHeaders
 from api.middleware.ratelimit import RateLimiter
+from api.routes.account import router as account_router
 from api.routes.admin import router as admin_router
 from api.routes.auth import router as auth_router
 from api.routes.conversations import router as conversations_router
@@ -20,7 +21,9 @@ from core.config import get_settings
 from core.conversations import ConversationStore
 from core.db import Database, database_url
 from core.pipeline import Pipeline
+from core.quota import AnonQuota
 from core.security.auth import AuthStore, load_or_create_secret
+from core.security.crypto import get_cipher
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -36,9 +39,12 @@ async def lifespan(app: FastAPI):
     # read fresh (not the import-time singleton) so runtime env is honoured
     settings = get_settings()
     app.state.pipeline = Pipeline(settings)
+    app.state.settings = settings
+    app.state.cipher = get_cipher(settings.encryption_key)  # BYOK key crypto
     app.state.auth_enabled = settings.auth_enabled
     app.state.auth = None
     app.state.conversations = None
+    app.state.anon_quota = None
     app.state.db = None
     if settings.auth_enabled:
         url = database_url()
@@ -47,6 +53,7 @@ async def lifespan(app: FastAPI):
         app.state.db = db
         app.state.auth = AuthStore(db, secret)
         app.state.conversations = ConversationStore(db)
+        app.state.anon_quota = AnonQuota(db)
         backend = "postgres" if db.is_pg else "sqlite"
         logging.getLogger(__name__).info(
             "auth enabled (%s store) — JWT required, chat history on", backend
@@ -87,6 +94,7 @@ app.include_router(documents_router)
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(conversations_router)
+app.include_router(account_router)
 
 
 @app.get("/healthz")

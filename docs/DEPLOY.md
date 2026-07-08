@@ -52,6 +52,20 @@ layer already supports this; porting `core/registry.py` onto it (the same swap
 done for auth and conversations) closes the gap. Until then, either keep
 uploads on a single instance or treat the official corpus as the shared source.
 
+### Access tiers & API-cost protection
+
+Anonymous visitors get `EURAG_FREE_ANON_QUESTIONS` (default 3) full-quality
+questions, enforced **server-side per IP/day**; then a login wall. Logged-in
+users are on Haiku (free) unless they add their own Anthropic key (BYOK, full
+cascade on their bill). See `docs/SECURITY.md` for the model. Two deploy TODOs
+to harden the anonymous surface:
+- **Cloudflare Turnstile** at the anonymous boundary defeats IP-rotation abuse
+  of the free questions — add your Turnstile site/secret keys (a seam is left
+  in the query path; wire the token check there).
+- **Google login** — the "Continue with Google" button is present but disabled;
+  provide a Google OAuth client ID/secret and an `/auth/google` callback to
+  enable it.
+
 ### Operational notes
 - **Secrets**: `EURAG_JWT_SECRET` and `EURAG_ENCRYPTION_KEY` — `openssl rand -hex 32` each. Rotating the encryption key requires a re-seed (version-prefixed ciphertext lets old rows still read).
 - **Corpus**: mount a populated `data/raw/` (run the scrapers once) so the first-boot seed loads all 47 documents; otherwise it seeds the samples.

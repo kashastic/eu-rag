@@ -2,12 +2,12 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { getToken } from "@/lib/api";
 
 export default function Home() {
   const router = useRouter();
+  // the app is anonymous-friendly; everyone lands in the chat
   useEffect(() => {
-    router.replace(getToken() ? "/chat" : "/login");
+    router.replace("/chat");
   }, [router]);
   return null;
 }

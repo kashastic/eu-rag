@@ -138,9 +138,15 @@ def _bearer(token):
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_protected_routes_require_a_token(auth_client):
-    assert auth_client.post("/query", json={"question": "What is an SME?"}).status_code == 401
+def test_query_is_anonymous_but_other_routes_require_a_token(auth_client):
+    # /query is the anonymous entry point (returns an answer + tier info)
+    anon = auth_client.post("/query", json={"question": "What is an SME?"})
+    assert anon.status_code == 200
+    assert anon.json()["tier"] == "anonymous"
+    # everything user-scoped still requires auth
     assert auth_client.get("/documents").status_code == 401
+    assert auth_client.get("/conversations").status_code == 401
+    assert auth_client.get("/account").status_code == 401
 
 
 def test_register_login_query_flow(auth_client):

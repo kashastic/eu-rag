@@ -38,6 +38,27 @@ Auth is **off by default** (`EURAG_AUTH_ENABLED` unset) so the local
 single-user experience is unchanged — no tokens, one built-in admin over the
 public corpus. Turning it on is what makes multi-user deployment safe.
 
+## API-cost abuse model (access tiers)
+
+The hosted deployment lets anyone try the product without an account, which is
+also the surface a malicious user would use to burn the owner's Anthropic
+credits. Defense:
+
+- **Anonymous tier**: `EURAG_FREE_ANON_QUESTIONS` (default 3) full-quality
+  questions, **counted server-side per client IP per day** (`core/quota.py`, on
+  the shared DB — the browser popup only reflects this, it never enforces it).
+  Spent → 401 `anonymous_limit_reached` → login wall.
+- **Logged-in free tier**: answers on a cheap model (`EURAG_FREE_MODEL`, Haiku)
+  with the Opus escalation **disabled** — bounds per-question cost.
+- **BYOK**: a user stores their own Anthropic key (AES-256-GCM encrypted, never
+  logged or returned); their requests use the full cascade billed **to them**.
+- **Rate limiting** (Redis-shared) caps request bursts on top of the above.
+
+Residual risk (accepted, no global $ ceiling by product choice): an attacker
+rotating many IPs can still get 3 full-quality questions each. Mitigation is a
+CAPTCHA (**Cloudflare Turnstile**) at the anonymous boundary — a clean seam
+exists; add the site key to enable. Documented in `docs/DEPLOY.md`.
+
 ## Still designed-for
 | Control | Status |
 |---|---|

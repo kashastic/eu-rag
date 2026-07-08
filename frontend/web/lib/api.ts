@@ -21,6 +21,16 @@ export type Answer = {
   mode: string;
   escalated: boolean;
   insufficient: boolean;
+  tier?: "anonymous" | "free" | "byok" | "local";
+  anon_remaining?: number;
+};
+
+export type Account = {
+  username: string;
+  role: string;
+  tier: "free" | "byok" | "local";
+  has_api_key: boolean;
+  byok_available: boolean;
 };
 
 export type ChatMessage = {
@@ -74,14 +84,18 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
     return request<T>(path, init, false);
   }
   if (!res.ok) {
-    const detail = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, detail.detail || `HTTP ${res.status}`);
+    const body = await res.json().catch(() => ({}));
+    const d = body.detail;
+    // detail may be a string or a structured object ({code, message})
+    const code = d && typeof d === "object" ? d.code : undefined;
+    const message = d && typeof d === "object" ? d.message : d || `HTTP ${res.status}`;
+    throw new ApiError(res.status, message, code);
   }
   return res.json();
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public code?: string) {
     super(message);
   }
 }
@@ -102,6 +116,22 @@ export const api = {
   },
   async me() {
     return request<{ username: string; role: string; auth_enabled: boolean }>("/auth/me");
+  },
+  // anonymous, stateless query — no token, no saved history
+  async queryAnon(question: string, industry?: string) {
+    return request<Answer>("/query", {
+      method: "POST",
+      body: JSON.stringify(industry ? { question, industry } : { question }),
+    });
+  },
+  async account() {
+    return request<Account>("/account");
+  },
+  async setApiKey(apiKey: string) {
+    return request("/account/api-key", { method: "PUT", body: JSON.stringify({ api_key: apiKey }) });
+  },
+  async clearApiKey() {
+    return request("/account/api-key", { method: "DELETE" });
   },
   async health() {
     return request<{ documents: number; auth_enabled: boolean; llm: string }>("/healthz");
