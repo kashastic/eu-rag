@@ -84,7 +84,11 @@ services:
       redis: { condition: service_started }
       seeder: { condition: service_completed_successfully }
     deploy:
-      replicas: 2   # scale freely — all state is shared
+      # All state is shared, so this scales freely — but memory is the limit:
+      # measured ~1.4GB idle / ~2.4GB peak at 1 replica, ~2.2GB / ~3.2GB at 2
+      # (an api replica is 835MB idle but 1.83GB while answering). 1 fits a 4GB
+      # box with headroom; raise it on a bigger host. See docs/DEPLOY.md §4.
+      replicas: 1
     restart: unless-stopped
 
   web:
