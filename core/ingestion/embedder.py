@@ -61,12 +61,20 @@ class FastEmbedEmbedder:
         return self.embed_texts([text])[0]
 
 
-def get_embedder(kind: str, model_name: str) -> Embedder:
+def get_embedder(kind: str, model_name: str, *, strict: bool = False) -> Embedder:
     if kind == "hash":
         return HashingEmbedder()
     try:
         return FastEmbedEmbedder(model_name)
     except Exception as exc:  # model download failed / package missing
+        if strict:
+            # Both embedders are dim=384, so Qdrant's dimension guard cannot
+            # detect the swap — a fallen-back replica would silently write
+            # garbage vectors into a shared collection. Prod refuses instead.
+            raise RuntimeError(
+                f"FastEmbed model '{model_name}' failed to load and "
+                f"EURAG_STRICT_BOOT is set — refusing the hashing fallback: {exc}"
+            ) from exc
         logger.warning(
             "FastEmbed unavailable (%s) — falling back to hashing embedder; "
             "retrieval quality relies on BM25 until a real embedder is configured",

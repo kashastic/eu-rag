@@ -4,7 +4,11 @@ import logging
 
 from core.config import Settings, get_settings
 from core.generation.answerer import AnswerResult, answer_question
-from core.generation.llm_client import ExtractiveClient, get_llm_client
+from core.generation.llm_client import (
+    ExtractiveClient,
+    LLMUnavailableError,
+    get_llm_client,
+)
 from core.ingestion.chunker import chunk_document
 from core.ingestion.document_loader import Document
 from core.ingestion.embedder import get_embedder
@@ -23,7 +27,11 @@ class Pipeline:
     def __init__(self, settings: Settings | None = None):
         self.settings = settings or get_settings()
         self.settings.data_dir.mkdir(parents=True, exist_ok=True)
-        self.embedder = get_embedder(self.settings.embedder, self.settings.embed_model)
+        self.embedder = get_embedder(
+            self.settings.embedder,
+            self.settings.embed_model,
+            strict=self.settings.strict_boot,
+        )
         self.registry = Registry(
             self.settings.registry_path,
             cipher=get_cipher(self.settings.encryption_key),
@@ -169,20 +177,29 @@ class Pipeline:
         ):
             logger.info(
                 "low-confidence answer — escalating to %s over wider retrieval",
-                self.escalation_llm.name,
+                escalation.name,
             )
             # the diverse first pass failed, so the retry goes deep instead:
             # insufficiency usually means the right document was found but the
-            # answering passage sat below the per-doc cap
-            result = self._answer(
-                question,
-                escalation,
-                k=self.settings.escalation_top_k,
-                max_per_doc=6,
-                industry=industry,
-                tenants=tenants,
-            )
-            result.escalated = True
+            # answering passage sat below the per-doc cap. Best-effort: if the
+            # escalation call itself fails, the primary answer still stands.
+            try:
+                deeper = self._answer(
+                    question,
+                    escalation,
+                    k=self.settings.escalation_top_k,
+                    max_per_doc=6,
+                    industry=industry,
+                    tenants=tenants,
+                )
+            except LLMUnavailableError as exc:
+                logger.warning(
+                    "escalation call failed (%s) — keeping the primary answer",
+                    exc.kind,
+                )
+            else:
+                deeper.escalated = True
+                result = deeper
         return result
 
     def _answer(

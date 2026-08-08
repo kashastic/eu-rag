@@ -46,14 +46,29 @@ def optional_principal(
         raise HTTPException(status_code=401, detail=str(exc)) from None
 
 
-def client_ip(request: Request) -> str:
-    """Best-effort client IP for anonymous quota. Behind our reverse proxy the
-    first X-Forwarded-For hop is the real client; direct, it's the peer.
-    Trust XFF only because the deploy terminates at a proxy we control."""
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        return xff.split(",")[0].strip()
+def peer_ip(request: Request, trust_proxy: bool) -> str:
+    """Best-effort client IP, the identity behind the anonymous quota and the
+    rate limiter.
+
+    X-Forwarded-For is only believed when `trust_proxy` says the app sits
+    behind a proxy that rewrites it (our Caddy does): the header is
+    client-settable, so trusting it on a directly reachable deployment would
+    hand anyone an unlimited supply of fresh quota keys. Off, we key on the
+    peer address — correct when direct, and merely coarse behind a proxy.
+
+    Takes the flag as an argument (rather than reading app.state) so the rate
+    limiter, which runs as plain Starlette middleware, can share it.
+    """
+    if trust_proxy:
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            return xff.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
+
+
+def client_ip(request: Request) -> str:
+    """`peer_ip` with the running app's proxy-trust setting."""
+    return peer_ip(request, request.app.state.settings.trust_proxy)
 
 
 def paid_tier(request: Request, principal: Principal) -> dict:

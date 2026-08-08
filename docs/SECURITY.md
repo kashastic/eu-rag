@@ -3,7 +3,9 @@
 Honesty ledger: what is **enforced today** vs still **designed-for**. The M3
 security spine landed 2026-07-06 — the controls below are implemented and
 covered by adversarial tests (`tests/test_security.py`, `tests/unit/test_auth.py`,
-`test_crypto.py`, `test_pii.py`).
+`test_crypto.py`, `test_pii.py`). The abuse, failure-handling, boot-guard and
+client-IP sections were added by the "live safely" batch (2026-07-25 → 08-08)
+and verified against a running production stack, not only in unit tests.
 
 ## Enforced today
 - **Tenant isolation** — every document belongs to a tenant (shared official
@@ -53,19 +55,102 @@ credits. Defense:
 - **BYOK**: a user stores their own Anthropic key (AES-256-GCM encrypted, never
   logged or returned); their requests use the full cascade billed **to them**.
 - **Rate limiting** (Redis-shared) caps request bursts on top of the above.
+- **Cloudflare Turnstile** (implemented 2026-07-25) gates anonymous questions
+  **and registration** whenever `EURAG_TURNSTILE_SECRET` is set. Unset = off, so
+  local single-user mode is untouched.
 
-Residual risk (accepted, no global $ ceiling by product choice): an attacker
-rotating many IPs can still get 3 full-quality questions each. Mitigation is a
-CAPTCHA (**Cloudflare Turnstile**) at the anonymous boundary — a clean seam
-exists; add the site key to enable. Documented in `docs/DEPLOY.md`.
+Residual risk (accepted, no global $ ceiling by product choice): a human
+rotating IPs can still get `EURAG_FREE_ANON_QUESTIONS` full-quality questions
+per address. Turnstile raises the cost of *automating* that; it does not
+eliminate it. Set `EURAG_FREE_ANON_QUESTIONS=0` for a BYOK-only deployment
+where the server's key is never spent on strangers.
+
+### Turnstile: where it sits and how it fails
+
+The check runs **before `anon_quota.consume`**, so a rejected token costs the
+visitor nothing — a failed challenge must not burn a free question. It also
+covers `/auth/register`, because a bot that can sign up bypasses the anonymous
+quota entirely and gets server-key answers on the logged-in free tier.
+
+Failure behaviour is deliberately asymmetric:
+
+| Condition | Result | Why |
+|---|---|---|
+| No token supplied | **reject**, no network call | Nothing to verify; don't pay a round-trip to say no |
+| Cloudflare says `success: false` | **reject** | The explicit negative is trustworthy |
+| Cloudflare unreachable / times out | **allow**, log a warning | A Cloudflare outage must not take the product down. The per-IP quota and the rate limiter still hold, so failing open degrades to *exactly the pre-Turnstile posture* rather than to "unlimited" |
+
+The sitekey is served from `/healthz` rather than baked in at build time, so
+rotating keys is an env change and never a rebuild. **The universal test keys
+pass everything** — a deployment still carrying them has no bot protection.
+
+### Client IP is a trust decision (`EURAG_TRUST_PROXY`)
+
+The anonymous quota and the rate limiter both key on "the client IP", resolved
+in one helper (`api/deps.peer_ip`). `X-Forwarded-For` is client-settable, so
+believing it on a directly reachable API hands anyone an unlimited supply of
+fresh quota keys — one forged header per free question. The flag therefore
+defaults to **off** (key on the peer address) and is set to `true` only in the
+prod compose, where nothing but Caddy can reach the API.
+
+This was originally a latent hole: the rate limiter was the documented concern,
+but `client_ip` — the *quota* key — trusted the header unconditionally. Both now
+share the guarded helper.
+
+**Verified, not assumed** (2026-07-25, against the real stack): a request
+carrying a forged `X-Forwarded-For` did **not** create a new quota bucket. Caddy
+replaces the client-supplied header, so the first hop is genuinely the peer.
+
+⚠️ **This breaks if you put Cloudflare's proxy (orange cloud) in front of
+Caddy** — the peer becomes a Cloudflare edge IP and every visitor collapses into
+a handful of shared quota and rate-limit buckets. Either configure Caddy's
+`trusted_proxies` with Cloudflare's ranges (or key off `CF-Connecting-IP`), or
+run Cloudflare DNS-only. Turnstile does not require Cloudflare to be in the
+traffic path.
+
+## Failure handling (availability + not leaking internals)
+
+LLM-call failures used to surface as raw 500s *and* silently cost an anonymous
+visitor a free question. Now:
+
+| Failure | Response | Notes |
+|---|---|---|
+| BYOK key rejected by Anthropic | **400 `byok_key_rejected`** | Deliberately *not* 401 — the web client treats 401 as "refresh the session token" and would loop. The message tells the user to fix the key in Settings |
+| Rate limited / overloaded / network / upstream | **503 `llm_unavailable`** + `Retry-After: 10` | One handler covers `/query` and the conversation routes |
+
+The anonymous quota is **consumed then refunded** on failure — consume-on-success
+would reopen a parallel-request overrun where N concurrent requests each see the
+same remaining count. The refund is guarded (`used > 0`) so it can never push a
+counter negative. Escalation is best-effort: a failed retry keeps the primary
+answer rather than turning a good response into an error.
+
+## Refusing to boot misconfigured
+
+`validate_startup()` runs at **import time**, before the app serves anything:
+
+- `auth_enabled` + a Postgres `EURAG_DATABASE_URL` + **no `EURAG_JWT_SECRET`** →
+  **raise**. Each instance would otherwise mint its own random secret, so a token
+  minted by one replica is rejected by the next — login "works" but breaks
+  intermittently under a load balancer, which is far worse than not booting.
+- Missing `EURAG_ENCRYPTION_KEY` → **warn** (BYOK unavailable, chunk text stored
+  as plaintext) but boot; this is a valid, if reduced, configuration.
+
+Separately, `EURAG_STRICT_BOOT=true` (prod) turns silent degradation fatal: an
+embedder that cannot load its model **raises** rather than falling back to the
+hash embedder — same vector dimension, undetectable, and it would quietly poison
+a shared Qdrant collection — and a failed seed kills the container instead of
+serving 4 sample documents as if they were the corpus.
 
 ## Still designed-for
 | Control | Status |
 |---|---|
 | Hash-chained audit (tamper-evident, not just append-only) | future hardening |
 | Per-tenant encryption keys | single key today; per-tenant is a KMS swap |
-| Prompt-injection test suite | M6 (prompt framing active now) |
-| Rate limiting / abuse controls | M6 |
+| Prompt-injection test suite | ✅ shipped M6 (prompt framing + tests) |
+| Rate limiting / abuse controls | ✅ shipped M6 + access tiers + Turnstile |
+| Global spend ceiling | **deliberately absent** — a genuinely hard question should be allowed to escalate. Bound cost via `EURAG_FREE_ANON_QUESTIONS` instead |
+| Account recovery | accounts have no email → no password reset |
+| Monitoring / alerting | none; no error tracking or spend alarm |
 
 ## Threat model
 - **Cross-tenant leakage** is the kill-shot risk for a compliance product →
@@ -92,9 +177,18 @@ exists; add the site key to enable. Documented in `docs/DEPLOY.md`.
 | 6 | Stolen/replayed auth token | Short-lived access tokens + single-use refresh rotation (jti revocation) | ✅ enforced |
 | 7 | Corpus poisoning via open ingest | `/ingest` requires auth when enabled; uploads isolated to the uploader's tenant | ✅ enforced |
 | 8 | Legal exposure from scraping | EUR-Lex/EC licensed for reuse (Decision 2011/833/EU); national scrapers respect robots.txt, rate-limit, identify, store excerpts + link out, opt-in per country | ✅ enforced |
-| 9 | Secrets in the repo | `.env` gitignored; config reads env only; JWT secret + encryption key are env-provided | ✅ active |
+| 9 | Secrets in the repo | `.env*` gitignored (with `.env.example` / `.env.local.example` negated); config reads env only; JWT secret + encryption key are env-provided | ✅ active |
+| 10 | Forged `X-Forwarded-For` mints unlimited free questions | `EURAG_TRUST_PROXY` defaults off; quota and limiter share one guarded helper; verified against the live stack that a forged header does not create a new bucket | ✅ enforced |
+| 11 | Bots drain the owner's API credits via the anon tier | Turnstile before `consume` on `/query` and on `/auth/register`; per-IP/day server-side quota; Redis rate limiting. Residual: a human rotating IPs | ✅ enforced (bounded, not eliminated) |
+| 12 | Multi-instance login breaks on per-instance JWT secrets | `validate_startup` refuses to boot on auth + Postgres without `EURAG_JWT_SECRET` | ✅ enforced |
+| 13 | Silent corpus/embedder degradation serves wrong answers | `EURAG_STRICT_BOOT` makes embedder fallback and seed failure fatal; `--expect-docs 47` fails a short deploy | ✅ enforced |
+| 14 | LLM outage leaks a stack trace / steals a free question | Typed `LLMUnavailableError` → 400/503 with a friendly message; anon quota refunded on failure | ✅ enforced |
 
 **Deployment note:** with `EURAG_AUTH_ENABLED=true`, `EURAG_JWT_SECRET` set,
 and `EURAG_ENCRYPTION_KEY` set, EURAG is safe to run multi-user. Left off, it
-is a local single-user tool. Remaining pre-production items (rate limiting,
-prompt-injection CI, load testing) are M6.
+is a local single-user tool.
+
+**Before a public URL**, check the two that are configuration rather than code:
+real Turnstile keys (the universal test keys pass everything) and a considered
+`EURAG_FREE_ANON_QUESTIONS` — the anonymous tier spends the *server's* Anthropic
+key on full-quality, escalation-enabled answers.

@@ -1,5 +1,7 @@
 # EURAG ★ — EU SME Intelligence Hub
 
+[![CI](https://github.com/kashastic/eu-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/kashastic/eu-rag/actions/workflows/ci.yml)
+
 **Citation-first RAG over official EU law.** Ask compliance and funding questions
 in plain language; get answers grounded in the actual regulations — GDPR, AI Act,
 DSA, working time, VAT, product safety and 25+ more — where **every claim carries

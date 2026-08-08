@@ -9,12 +9,16 @@ from core.security.pii import PIIError
 router = APIRouter(tags=["ingest"])
 
 
+# Upper bounds on an authenticated upload. Fixed constants, not config: they
+# exist to stop a single request from pinning CPU in the chunker/embedder (and
+# filling the registry), not to express a product limit. 500k chars is ~4x the
+# largest act in the corpus (consolidated GDPR), so real documents fit.
 class IngestRequest(BaseModel):
     title: str = Field(min_length=1, max_length=500)
-    text: str = Field(min_length=1)
-    source_url: str = ""
-    source_type: str = "upload"
-    language: str = "en"
+    text: str = Field(min_length=1, max_length=500_000)
+    source_url: str = Field(default="", max_length=2000)
+    source_type: str = Field(default="upload", max_length=40)
+    language: str = Field(default="en", max_length=16)
 
 
 @router.post("/ingest")

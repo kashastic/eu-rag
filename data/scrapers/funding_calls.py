@@ -83,10 +83,14 @@ def fetch_calls(*, force: bool = False) -> dict:
     return data
 
 
-def document_from_calls(data: dict) -> Document:
+def document_from_calls(data: dict, snapshot_date: date | None = None) -> Document:
+    # The snapshot date is part of the text, hence of the content hash. The
+    # cached path passes the cache file's mtime so re-seeding an unchanged
+    # cache is a no-op instead of a daily re-embed of this document.
+    taken = (snapshot_date or date.today()).isoformat()
     lines = [
         f"Snapshot of open and forthcoming EU grant calls relevant to SMEs, "
-        f"taken {date.today().isoformat()} from the EU Funding & Tenders "
+        f"taken {taken} from the EU Funding & Tenders "
         f"portal ({data.get('totalResults', '?')} open grant topics matched "
         '"SME"; the 40 most relevant are listed). Deadlines change — always '
         f"verify at the portal: {PORTAL_URL}",
@@ -127,7 +131,10 @@ def load_cached_document() -> Document | None:
     if not CACHE_PATH.is_file():
         return None
     try:
-        return document_from_calls(json.loads(CACHE_PATH.read_text(encoding="utf-8")))
+        return document_from_calls(
+            json.loads(CACHE_PATH.read_text(encoding="utf-8")),
+            snapshot_date=date.fromtimestamp(CACHE_PATH.stat().st_mtime),
+        )
     except (ValueError, json.JSONDecodeError) as exc:
         logger.warning("skipping cached funding calls: %s", exc)
         return None

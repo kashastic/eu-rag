@@ -99,6 +99,15 @@ class Settings:
     pii_backend: str = field(
         default_factory=lambda: os.environ.get("EURAG_PII_BACKEND", "regex")
     )
+    # Fail loud instead of degrading: when true, an embedder that can't load
+    # its model raises instead of silently falling back to hashing (which
+    # would write low-quality vectors into a shared Qdrant), and the Docker
+    # entrypoint treats a failed seed as fatal. Prod sets this; local dev and
+    # tests keep the lenient default.
+    strict_boot: bool = field(
+        default_factory=lambda: os.environ.get("EURAG_STRICT_BOOT", "").lower()
+        in ("1", "true", "yes")
+    )
     # --- access tiers (cost control) ---
     # Anonymous users get this many full-quality questions (the Sonnet→Opus
     # cascade), counted server-side per IP/day, before a login wall.
@@ -110,12 +119,32 @@ class Settings:
     free_model: str = field(
         default_factory=lambda: os.environ.get("EURAG_FREE_MODEL", "claude-haiku-4-5")
     )
+    # Cloudflare Turnstile at the anonymous boundary (bot protection for the
+    # free-question funnel and registration). Secret unset = check off (local
+    # default); sitekey unset = the web app renders no widget. Served to the
+    # frontend at runtime via /healthz, so rotating keys is an env change only.
+    turnstile_secret: str | None = field(
+        default_factory=lambda: os.environ.get("EURAG_TURNSTILE_SECRET") or None
+    )
+    turnstile_sitekey: str | None = field(
+        default_factory=lambda: os.environ.get("EURAG_TURNSTILE_SITEKEY") or None
+    )
     # Rate limit on /query and /ingest, per client (user or IP). 0 disables.
     rate_limit_per_min: int = field(
         default_factory=lambda: int(os.environ.get("EURAG_RATE_LIMIT_PER_MIN", "30"))
     )
     rate_limit_burst: int = field(
         default_factory=lambda: int(os.environ.get("EURAG_RATE_LIMIT_BURST", "10"))
+    )
+    # Trust X-Forwarded-For for the per-client identity used by the rate
+    # limiter and the anonymous quota. Set this ONLY when the app is reachable
+    # exclusively through a reverse proxy that rewrites the header (our Caddy
+    # does) — otherwise a client can forge it and mint unlimited buckets.
+    # Off = key on the peer address, which behind a proxy puts every visitor
+    # in the proxy's single bucket. Prod compose sets it true.
+    trust_proxy: bool = field(
+        default_factory=lambda: os.environ.get("EURAG_TRUST_PROXY", "").lower()
+        in ("1", "true", "yes")
     )
     # Redis URL for a shared rate-limit bucket across instances. Unset = the
     # in-process limiter (correct only for a single instance).
@@ -151,3 +180,32 @@ class Settings:
 
 def get_settings() -> Settings:
     return Settings()
+
+
+def validate_startup(settings: Settings, db_url: str | None) -> None:
+    """Refuse to boot a multi-instance deploy with broken shared secrets.
+
+    Auth on + shared Postgres means several replicas must validate each
+    other's JWTs; without EURAG_JWT_SECRET each instance mints its own
+    secret and logins break silently depending on which replica answers —
+    so that raises. A missing encryption key is survivable (BYOK off,
+    uploaded chunks at rest in plaintext) and only warns. Local zero-config
+    mode (auth off) passes untouched.
+    """
+    from core.db import is_postgres
+
+    if not settings.auth_enabled:
+        return
+    if is_postgres(db_url) and settings.jwt_secret is None:
+        raise RuntimeError(
+            "EURAG_JWT_SECRET must be set to run with auth enabled on a shared "
+            "database: per-instance auto-generated secrets break login across "
+            "replicas. Generate one with `openssl rand -hex 32`."
+        )
+    if settings.encryption_key is None:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "EURAG_ENCRYPTION_KEY is not set: BYOK key storage is disabled and "
+            "uploaded chunk text is stored in plaintext."
+        )

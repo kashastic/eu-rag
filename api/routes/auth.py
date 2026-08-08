@@ -5,7 +5,8 @@ can turn EURAG_AUTH_ENABLED on without changing the client contract."""
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from api.deps import current_principal
+from api.deps import client_ip, current_principal
+from core.security import turnstile
 from core.security.auth import AuthError, AuthStore, Principal
 
 router = APIRouter(tags=["auth"])
@@ -14,6 +15,12 @@ router = APIRouter(tags=["auth"])
 class Credentials(BaseModel):
     username: str = Field(min_length=3, max_length=40)
     password: str = Field(min_length=10, max_length=200)
+
+
+class RegisterRequest(Credentials):
+    # bot gate: automated signups would bypass the anonymous quota and get
+    # server-key answers. Checked only when a Turnstile secret is configured.
+    turnstile_token: str | None = Field(default=None, max_length=2048)
 
 
 class RefreshRequest(BaseModel):
@@ -27,9 +34,21 @@ def _store(request: Request) -> AuthStore:
 
 
 @router.post("/auth/register")
-def register(body: Credentials, request: Request):
+def register(body: RegisterRequest, request: Request):
+    store = _store(request)
+    settings = request.app.state.settings
+    if settings.turnstile_secret and not turnstile.verify(
+        body.turnstile_token, settings.turnstile_secret, remoteip=client_ip(request)
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "turnstile_failed",
+                "message": "Verification failed — please retry the challenge.",
+            },
+        )
     try:
-        principal = _store(request).register(body.username, body.password)
+        principal = store.register(body.username, body.password)
     except AuthError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     return {"username": principal.username, "role": principal.role}

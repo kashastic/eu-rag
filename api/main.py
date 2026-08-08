@@ -4,8 +4,8 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.middleware.headers import SecurityHeaders
@@ -17,9 +17,10 @@ from api.routes.conversations import router as conversations_router
 from api.routes.documents import router as documents_router
 from api.routes.ingest import router as ingest_router
 from api.routes.query import router as query_router
-from core.config import get_settings
+from core.config import get_settings, validate_startup
 from core.conversations import ConversationStore
 from core.db import Database, database_url
+from core.generation.llm_client import LLMUnavailableError
 from core.pipeline import Pipeline
 from core.quota import AnonQuota
 from core.security.auth import AuthStore, load_or_create_secret
@@ -32,6 +33,9 @@ _STATIC_DIR = Path(__file__).resolve().parent.parent / "frontend" / "static"
 # so its config can't come from the per-request lifespan. Runtime toggles for
 # rate limiting therefore require a process restart (documented in .env).
 _settings = get_settings()
+# fail at import, not first login: a multi-instance deploy with missing
+# shared secrets must never come up half-working
+validate_startup(_settings, database_url())
 
 
 @asynccontextmanager
@@ -87,7 +91,38 @@ if _settings.rate_limit_per_min > 0:
         rate_per_min=_settings.rate_limit_per_min,
         burst=_settings.rate_limit_burst,
         redis_client=_redis,
+        trust_proxy=_settings.trust_proxy,
     )
+# one place for every route that ends in an LLM call (/query, conversation
+# messages): operational upstream failures must never surface as raw 500s.
+# "auth" is a rejected key — for BYOK users a fixable settings problem → 400;
+# everything else is transient → 503 with a retry hint.
+@app.exception_handler(LLMUnavailableError)
+async def llm_unavailable(request: Request, exc: LLMUnavailableError):
+    if exc.kind == "auth":
+        return JSONResponse(
+            status_code=400,
+            content={
+                "detail": {
+                    "code": "byok_key_rejected",
+                    "message": "Your Anthropic API key was rejected — update "
+                    "or remove it in Settings.",
+                }
+            },
+        )
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": {
+                "code": "llm_unavailable",
+                "message": "The answering model is temporarily unavailable — "
+                "please try again in a moment.",
+            }
+        },
+        headers={"Retry-After": "10"},
+    )
+
+
 app.include_router(query_router)
 app.include_router(ingest_router)
 app.include_router(documents_router)
@@ -107,6 +142,8 @@ def healthz():
         "documents": len(pipeline.registry.list_documents()),
         "auth_enabled": app.state.auth_enabled,
         "encryption": pipeline.registry._cipher is not None,
+        # the web app reads the sitekey at runtime (rotate via env, no rebuild)
+        "turnstile_sitekey": app.state.settings.turnstile_sitekey,
     }
 
 

@@ -2,6 +2,105 @@
 
 Running log of build sessions. Newest first.
 
+## 2026-07-25 → 08-08 — "make it live safely": blockers, hardening, CI, prod bring-up
+
+v1.0.0 was feature-complete but not safely deployable. A sanity pass found: a
+clean build seeds **4 documents instead of 47** (`data/raw/` is gitignored and
+the loaders silently skip); the anonymous tier exposes Opus-capable calls with
+**no bot protection**; missing shared secrets only *logged* instead of refusing
+to boot; the prod **web image could not build** (`Dockerfile` copied a
+nonexistent `public/`); both API replicas re-seeded on every fresh container;
+LLM failures surfaced as raw 500s and **burned an anon free question**; and
+there was no CI. Eight phases, one commit. Design decisions (D1–D17) are in
+`context_files/PLAN_LIVE_SAFETY.md`. **No phase touched retrieval**, so the
+before/after-harness standing rule did not apply.
+
+- **Corpus reproducibility (D1–D5).** `data.seed` grew a CLI: `--scrape` fills
+  missing caches, `--expect-docs N` exits 1 below N so a short corpus fails a
+  deploy loudly, and an `flock` on `data/raw/.seed.lock` serializes replicas. A
+  one-shot **`seeder`** service in the prod compose runs to completion before any
+  api replica starts (`service_completed_successfully`), with shared `apivar` +
+  `modelcache` volumes so replicas never seed, scrape, or re-download the ~200MB
+  of ONNX models. `EURAG_STRICT_BOOT` makes degradation fatal: the embedder
+  **raises** instead of silently falling back to the hash embedder (same
+  dimension, undetectable, would poison shared Qdrant), and a failed seed kills
+  the container. The funding snapshot date now comes from the cache file's mtime
+  rather than `date.today()`, so its content hash is stable — no daily re-embed.
+  Registry connections got `WAL` + `busy_timeout`.
+- **Bot gate at the anonymous boundary (D6–D10).** `core/security/turnstile.py`
+  — `verify()` rejects a missing token with no network call, fails **closed** on
+  an explicit `success:false`, and fails **open** on a Cloudflare outage (the
+  per-IP quota still holds; an outage must not kill the funnel). Gated *before*
+  `anon_quota.consume` in `/query` and on `/auth/register` (bot signups would
+  otherwise bypass the anon quota and get server-key answers). The **sitekey is
+  served from `/healthz`**, so rotating keys is an env change with no rebuild.
+  Built and verified against Cloudflare's universal test keys.
+- **Startup secret guard (D17).** `validate_startup()` runs at import time:
+  raises when `auth_enabled` + a Postgres URL are set without
+  `EURAG_JWT_SECRET` (per-instance auto-secrets silently break multi-instance
+  login), warns when `EURAG_ENCRYPTION_KEY` is missing. Local zero-config
+  untouched.
+- **LLM failure handling + quota fairness (D11, D12).** `LLMUnavailableError`
+  maps SDK exceptions to a `kind`; an app-level handler turns a rejected BYOK key
+  into **400 `byok_key_rejected`** (not 401 — the web client treats 401 as
+  "refresh the session") and everything else into **503 `llm_unavailable` +
+  `Retry-After: 10`**. Anonymous questions are consume-then-**refund** on
+  failure (consume-on-success would reopen a parallel-request overrun).
+  Escalation is best-effort — a failed retry keeps the primary answer — and a
+  latent crash was fixed where the log read `self.escalation_llm.name`, which is
+  `None` on BYOK-only requests.
+- **Hardening (D14, D15).** `/ingest` field caps (text 500k, url 2000, type 40,
+  lang 16); `anon_quota` sweeps rows older than 2 days inside the existing
+  consume transaction, on the insert branch only, so steady-state consumes stay
+  a single UPDATE; `frontend/web/public/.gitkeep` unblocks the web image.
+  **Scope note:** D15 named only the rate limiter, but `api/deps.client_ip` —
+  the *anon quota* key — was trusting `X-Forwarded-For` unconditionally, so a
+  forged header bought unlimited free full-quality questions on any directly
+  reachable deploy. Both now share one helper, `deps.peer_ip(request,
+  trust_proxy)`, behind `EURAG_TRUST_PROXY` (default off). That flipped
+  `test_anonymous_quota_is_per_ip_not_shared`, which had asserted the unsafe
+  behaviour; it was replaced by trusted/untrusted matrices on both surfaces.
+- **CI (D16).** `.github/workflows/ci.yml` — three parallel jobs on push/PR:
+  **python** (3.11, matching the API image), **web** (node 22, `npm ci && npm run
+  build`), **postgres** (`postgres:16` service for the two dialect-parity tests).
+  `tests/test_postgres.py` *skips itself* when the URL is unusable, so a broken
+  service would pass green — an explicit `psycopg.connect` step runs first and
+  fails the job instead.
+- **Prod bring-up — the integration test.** Both images build; the full stack ran
+  end to end. Seeder: **47 documents, exit 0, ~3m20s** cold (4202 chunks, populated
+  `data/raw`); replicas healthy ~12s later; a re-run is **~4s** with all 47
+  hash-skipped and zero re-embeds. `/healthz` reported 47 docs and
+  `embedder=fastembed` (strict boot held). Smoke: no-token → 403 with the quota
+  **untouched**; wall → 401; register 403/200; free tier no escalation; real BYOK
+  → cascade fired; bad BYOK → **400, not 500**; key at rest is `enc1:` ciphertext;
+  saved chats readable from every replica; limiter → 10 then **429 + Retry-After**
+  with buckets in Redis. `docker kill` on one replica → 10/10 healthz plus a real
+  cited answer. **A forged `X-Forwarded-For` did not mint a fresh quota key** —
+  Caddy replaces the header — which upgrades D15's central assumption from
+  *assumed* to *verified*.
+- **Two real bugs found by the bring-up.** (1) The `caddy` service had **no
+  `environment:` block**, so `EURAG_DOMAIN` never reached the container and the
+  site address always fell back to `:80` — **auto-HTTPS could never have engaged
+  in production.** Fixed with `EURAG_DOMAIN: ${EURAG_DOMAIN:-:80}`; the `:80`
+  default *must* live at the compose layer, because Caddy applies its own default
+  only when the variable is unset and an empty string collapses the site address
+  (`caddy adapt` then dies with `unrecognized global option: encode`). (2)
+  Putting the prod secrets in `.env` **failed 13 tests** — `pydantic-settings`
+  reads `.env`, so `EURAG_TURNSTILE_SECRET` switched the bot gate on inside the
+  suite. Not a code regression, but a local-only trap invisible to CI; rehearsal
+  secrets now live in gitignored `.env.prod.local` passed via `--env-file`.
+- **Sizing, measured** (`docker stats`): an api replica is **835MB idle but
+  1.83GB while answering** — it more than doubles. Whole stack **2.2GB idle /
+  3.2GB peak** at two replicas, ~1.4GB / **~2.4GB** at one. Consequence: every
+  1GB "always free" VM (AWS `t3.micro`, Azure `B1S`, GCP `e2-micro`) is
+  unusable; the floor is a 4GB box.
+- **Docs.** `docs/DEPLOY.md` rewritten (73 → ~290 lines) with boot order, the
+  shared-state table, strict boot, the trust-proxy model, measured sizing, a
+  GCP free-tier runbook, and backups. Deploy target settled as GCP `e2-medium`
+  on trial credit — Oracle Always Free would have been free-forever and fits,
+  but account signup was rejected.
+- Verified at commit: **209 passed, 3 skipped**; `npm run build` clean.
+
 ## 2026-07-08 — access tiers: anonymous free questions, login wall, BYOK
 Removed the forced login and added the cost-control model the user specified.
 - **Anonymous tier**: `/query` now works without a token — 3 (configurable)

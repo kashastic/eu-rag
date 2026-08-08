@@ -18,15 +18,22 @@ COPY --from=build /install /usr/local
 COPY --from=build /app /app
 COPY docker-entrypoint.sh /usr/local/bin/eurag-entrypoint
 RUN chmod +x /usr/local/bin/eurag-entrypoint && \
-    mkdir -p /app/var /app/data/raw && chown -R eurag:eurag /app
+    mkdir -p /app/var /app/data/raw /home/eurag/.cache && \
+    chown -R eurag:eurag /app /home/eurag/.cache
 USER eurag
 
 # writable state (registry, vectors, auth db) and corpus cache live here
 VOLUME ["/app/var", "/app/data/raw"]
 EXPOSE 8000
 ENV EURAG_DATA_DIR=/app/var
+# pin model caches under one path so a shared volume can hold the ~200 MB of
+# ONNX downloads (embedder + reranker) once, instead of per replica
+ENV HF_HOME=/home/eurag/.cache/hf \
+    FASTEMBED_CACHE_PATH=/home/eurag/.cache/fastembed
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+# start-period covers first Pipeline init (ONNX model load; cold cache means
+# a download) — seeding no longer happens in the API request path in prod
+HEALTHCHECK --interval=15s --timeout=5s --start-period=180s --retries=5 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=3).status==200 else 1)"
 
 ENTRYPOINT ["eurag-entrypoint"]

@@ -10,6 +10,12 @@ Two backends, chosen by whether a Redis client is supplied:
 Keyed by bearer token when present else client IP, so one user can't spend
 another's budget. Keys are hashed before hitting Redis (never store raw
 tokens). Disabled when rate == 0.
+
+Behind a reverse proxy the peer address is the proxy, which would put every
+anonymous visitor in one shared bucket; `trust_proxy` (EURAG_TRUST_PROXY,
+prod only) switches the IP key to the first X-Forwarded-For hop. It stays off
+by default because a directly reachable app must not let a client pick its
+own bucket by forging the header.
 """
 
 import hashlib
@@ -19,6 +25,8 @@ from collections import OrderedDict
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+
+from api.deps import peer_ip
 
 _LIMITED_PATHS = ("/query", "/ingest")
 _MAX_BUCKETS = 10_000
@@ -50,10 +58,13 @@ class _Bucket:
 
 
 class RateLimiter(BaseHTTPMiddleware):
-    def __init__(self, app, rate_per_min: int, burst: int, redis_client=None):
+    def __init__(
+        self, app, rate_per_min: int, burst: int, redis_client=None, trust_proxy=False
+    ):
         super().__init__(app)
         self.rate = rate_per_min / 60.0  # tokens/sec
         self.capacity = float(max(burst, 1))
+        self._trust_proxy = trust_proxy
         self._redis = redis_client
         self._sha = None
         if redis_client is not None:
@@ -65,8 +76,7 @@ class RateLimiter(BaseHTTPMiddleware):
         if auth.lower().startswith("bearer "):
             raw = "tok:" + auth.split(" ", 1)[1]
         else:
-            client = request.client
-            raw = "ip:" + (client.host if client else "unknown")
+            raw = "ip:" + peer_ip(request, self._trust_proxy)
         return "eurag:rl:" + hashlib.sha256(raw.encode()).hexdigest()[:24]
 
     def _allow_redis(self, key: str) -> tuple[bool, float]:

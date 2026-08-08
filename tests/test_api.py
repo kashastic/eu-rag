@@ -42,6 +42,23 @@ def test_ingest_endpoint_validates_provenance(settings):
         assert res.status_code in (422,)
 
 
+def test_ingest_rejects_oversize_payload(settings):
+    """Caps keep one request from pinning the chunker/embedder on megabytes."""
+    from api.main import app
+
+    with TestClient(app) as client:
+        too_long = client.post(
+            "/ingest", json={"title": "Huge", "text": "widget " * 80_000}
+        )
+        assert too_long.status_code == 422
+        bad_url = client.post(
+            "/ingest",
+            json={"title": "Doc", "text": "body", "source_url": "https://e.eu/"
+                  + "a" * 2000},
+        )
+        assert bad_url.status_code == 422
+
+
 def test_ingest_then_query_roundtrip(settings):
     from api.main import app
 

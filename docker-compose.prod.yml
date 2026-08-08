@@ -33,23 +33,56 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
 
+  # One-shot corpus job: fetch any missing data/raw caches (network), embed,
+  # and write the registry + vectors. Runs to completion before any api
+  # replica starts, so the replicas never scrape or embed — they just serve.
+  # With a populated ./data/raw (rsync'd from a dev machine) nothing is
+  # fetched and this is a fast no-op re-check.
+  seeder:
+    build: .
+    image: eurag-api:latest
+    entrypoint:
+      ["python", "-m", "data.seed", "--scrape", "--expect-docs", "${EURAG_EXPECT_DOCS:-47}"]
+    environment:
+      EURAG_STRICT_BOOT: "true"                  # no silent hash-embedder fallback
+      EURAG_ENCRYPTION_KEY: ${EURAG_ENCRYPTION_KEY}
+      QDRANT_URL: http://qdrant:6333
+    volumes:
+      - ./data/raw:/app/data/raw
+      - apivar:/app/var
+      - modelcache:/home/eurag/.cache
+    depends_on:
+      qdrant: { condition: service_started }
+    restart: "no"
+
   api:
     build: .
     image: eurag-api:latest
     environment:
       EURAG_AUTH_ENABLED: "true"
+      EURAG_STRICT_BOOT: "true"
       EURAG_JWT_SECRET: ${EURAG_JWT_SECRET}
       EURAG_ENCRYPTION_KEY: ${EURAG_ENCRYPTION_KEY}
       EURAG_DATABASE_URL: postgresql://eurag:${POSTGRES_PASSWORD}@postgres:5432/eurag
       QDRANT_URL: http://qdrant:6333
       EURAG_REDIS_URL: redis://redis:6379/0
+      # only Caddy can reach the api service, and it rewrites X-Forwarded-For,
+      # so the first hop is the real client — without this every visitor would
+      # share Caddy's single rate-limit bucket and quota key
+      EURAG_TRUST_PROXY: "true"
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      # bot gate on the anon funnel + registration; empty = off (see .env.example)
+      EURAG_TURNSTILE_SITEKEY: ${EURAG_TURNSTILE_SITEKEY:-}
+      EURAG_TURNSTILE_SECRET: ${EURAG_TURNSTILE_SECRET:-}
     volumes:
-      - ./data/raw:/app/data/raw   # corpus cache (seed target on first boot)
+      - ./data/raw:/app/data/raw   # corpus cache (shared with the seeder)
+      - apivar:/app/var            # registry + jwt material, seeded once
+      - modelcache:/home/eurag/.cache   # ONNX models downloaded once
     depends_on:
       postgres: { condition: service_healthy }
       qdrant: { condition: service_started }
       redis: { condition: service_started }
+      seeder: { condition: service_completed_successfully }
     deploy:
       replicas: 2   # scale freely — all state is shared
     restart: unless-stopped
@@ -64,6 +97,13 @@ services:
   caddy:
     image: caddy:2-alpine
     ports: ["80:80", "443:443"]
+    environment:
+      # Caddy substitutes this into the Caddyfile's site address; a real domain
+      # switches it to :443 with an auto-provisioned cert. The fallback MUST be
+      # supplied here, not left to the Caddyfile's `{$EURAG_DOMAIN::80}`
+      # default: an env var set to the *empty* string is not "unset", so the
+      # site address would collapse and Caddy would fail to parse the file.
+      EURAG_DOMAIN: ${EURAG_DOMAIN:-:80}
     volumes:
       - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -74,5 +114,7 @@ services:
 volumes:
   pgdata:
   qdrant:
+  apivar:
+  modelcache:
   caddy_data:
   caddy_config:

@@ -12,6 +12,7 @@ import {
   type ChatSummary,
 } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
+import { Turnstile, type TurnstileHandle } from "@/components/Turnstile";
 
 const STARTERS = [
   "Do I need a data protection officer for a 30-person company?",
@@ -32,6 +33,10 @@ export default function ChatPage() {
   // anonymous mode: ephemeral thread
   const [anonMsgs, setAnonMsgs] = useState<ChatMessage[]>([]);
   const [anonRemaining, setAnonRemaining] = useState<number | null>(null);
+  // bot gate: sitekey comes from /healthz at runtime; tokens are single-use
+  const [sitekey, setSitekey] = useState<string | null>(null);
+  const [tsToken, setTsToken] = useState<string | null>(null);
+  const tsRef = useRef<TurnstileHandle>(null);
 
   const [pending, setPending] = useState(false);
   const [question, setQuestion] = useState("");
@@ -43,7 +48,10 @@ export default function ChatPage() {
 
   const init = useCallback(async () => {
     const health = await api.health().catch(() => null);
-    if (health) setDocuments(health.documents);
+    if (health) {
+      setDocuments(health.documents);
+      setSitekey(health.turnstile_sitekey ?? null);
+    }
     if (getToken()) {
       try {
         const [acct, list] = await Promise.all([api.account(), api.listChats()]);
@@ -107,6 +115,8 @@ export default function ChatPage() {
   async function send(text: string) {
     const q = text.trim();
     if (!q || pending) return;
+    // anon with an unsolved widget: keep the question, Ask stays disabled
+    if (!authed && sitekey && !tsToken) return;
     setQuestion("");
     const userMsg: ChatMessage = {
       role: "user",
@@ -120,7 +130,7 @@ export default function ChatPage() {
       setAnonMsgs((m) => [...m, userMsg]);
       setPending(true);
       try {
-        const ans = await api.queryAnon(q, industry || undefined);
+        const ans = await api.queryAnon(q, industry || undefined, tsToken ?? undefined);
         setAnonMsgs((m) => [...m, answerToMsg(ans)]);
         if (typeof ans.anon_remaining === "number") setAnonRemaining(ans.anon_remaining);
       } catch (err) {
@@ -132,6 +142,7 @@ export default function ChatPage() {
         }
       } finally {
         setPending(false);
+        tsRef.current?.reset(); // tokens are single-use — re-arm for the next question
       }
       return;
     }
@@ -245,6 +256,9 @@ export default function ChatPage() {
 
         <div className="composer">
           <div className="composer-inner">
+            {!authed && sitekey && (
+              <Turnstile ref={tsRef} sitekey={sitekey} onToken={setTsToken} />
+            )}
             <div className="industry-row">
               <label htmlFor="ind">Industry · optional</label>
               <input
@@ -271,7 +285,12 @@ export default function ChatPage() {
                   }
                 }}
               />
-              <button onClick={() => send(question)} disabled={pending}>Ask</button>
+              <button
+                onClick={() => send(question)}
+                disabled={pending || (!authed && !!sitekey && !tsToken)}
+              >
+                Ask
+              </button>
             </div>
             <p className="disclaimer">Information, not legal advice · every claim links to an official source</p>
           </div>
@@ -281,6 +300,7 @@ export default function ChatPage() {
       {loginOpen && (
         <LoginModal
           forced={loginForced}
+          sitekey={sitekey}
           onClose={() => setLoginOpen(false)}
           onSuccess={onLoggedIn}
         />
@@ -312,10 +332,12 @@ function errMsg(err: unknown): ChatMessage {
 
 function LoginModal({
   forced,
+  sitekey,
   onClose,
   onSuccess,
 }: {
   forced: boolean;
+  sitekey: string | null;
   onClose: () => void;
   onSuccess: () => void;
 }) {
@@ -324,18 +346,22 @@ function LoginModal({
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // bot gate on account creation (login is not gated)
+  const [tsToken, setTsToken] = useState<string | null>(null);
+  const tsRef = useRef<TurnstileHandle>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setBusy(true);
     try {
-      if (mode === "register") await api.register(username, password);
+      if (mode === "register") await api.register(username, password, tsToken ?? undefined);
       await api.login(username, password);
       onSuccess();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong");
       setBusy(false);
+      tsRef.current?.reset(); // token spent server-side — re-arm before retry
     }
   }
 
@@ -356,8 +382,15 @@ function LoginModal({
           <label htmlFor="mp">Password {mode === "register" && "(min 10 chars)"}</label>
           <input id="mp" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </div>
+        {mode === "register" && sitekey && (
+          <Turnstile ref={tsRef} sitekey={sitekey} onToken={setTsToken} />
+        )}
         {error && <p className="err">{error}</p>}
-        <button className="btn" type="submit" disabled={busy}>
+        <button
+          className="btn"
+          type="submit"
+          disabled={busy || (mode === "register" && !!sitekey && !tsToken)}
+        >
           {busy ? "…" : mode === "login" ? "Sign in" : "Create account"}
         </button>
         <button className="btn google" type="button" disabled title="Configure a Google OAuth client to enable">

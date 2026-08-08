@@ -12,6 +12,20 @@ from typing import Protocol
 logger = logging.getLogger(__name__)
 
 
+class LLMUnavailableError(Exception):
+    """An LLM call failed for an operational (not programming) reason.
+
+    `kind` drives the API response: "auth" (rejected/revoked key — for BYOK
+    users a fixable configuration problem), "rate_limited", "overloaded",
+    "network", or "upstream". The route layer maps auth → 400 and the rest
+    → 503 + Retry-After; the anonymous quota refunds the consumed question.
+    """
+
+    def __init__(self, kind: str, message: str = ""):
+        self.kind = kind
+        super().__init__(message or kind)
+
+
 class LLMClient(Protocol):
     name: str
 
@@ -28,12 +42,25 @@ class AnthropicClient:
         self.name = f"anthropic:{model}"
 
     def complete(self, system: str, user: str) -> str:
-        response = self._client.messages.create(
-            model=self._model,
-            max_tokens=2048,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-        )
+        import anthropic
+
+        try:
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=2048,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+            )
+        except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as exc:
+            raise LLMUnavailableError("auth", str(exc)) from exc
+        except anthropic.RateLimitError as exc:
+            raise LLMUnavailableError("rate_limited", str(exc)) from exc
+        except anthropic.InternalServerError as exc:  # ≥500, incl. 529 overloaded
+            raise LLMUnavailableError("overloaded", str(exc)) from exc
+        except anthropic.APIConnectionError as exc:  # timeouts subclass this
+            raise LLMUnavailableError("network", str(exc)) from exc
+        except anthropic.APIStatusError as exc:
+            raise LLMUnavailableError("upstream", str(exc)) from exc
         return "".join(b.text for b in response.content if b.type == "text")
 
 

@@ -11,6 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from api.deps import allowed_tenants, client_ip, optional_principal, paid_tier
+from core.generation.llm_client import LLMUnavailableError
+from core.security import turnstile
 from core.security.auth import Principal, question_hash
 
 router = APIRouter(tags=["query"])
@@ -19,6 +21,7 @@ router = APIRouter(tags=["query"])
 class QueryRequest(BaseModel):
     question: str = Field(min_length=3, max_length=2000)
     industry: str | None = Field(default=None, max_length=80)
+    turnstile_token: str | None = Field(default=None, max_length=2048)
 
 
 @router.post("/query")
@@ -33,7 +36,20 @@ def query(
 
     # anonymous (only when auth is enabled — local mode has no gating)
     if principal is None:
-        key = "ip:" + client_ip(request)
+        ip = client_ip(request)
+        # bot gate BEFORE the quota spend — a rejected token must not burn
+        # a free question. Off when no secret is configured (local default).
+        if settings.turnstile_secret and not turnstile.verify(
+            body.turnstile_token, settings.turnstile_secret, remoteip=ip
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "turnstile_failed",
+                    "message": "Verification failed — please retry the challenge.",
+                },
+            )
+        key = "ip:" + ip
         allowed, remaining = app.state.anon_quota.consume(key, settings.free_anon_questions)
         if not allowed:
             raise HTTPException(
@@ -43,13 +59,19 @@ def query(
                     "message": "You've used your free questions. Log in to keep going.",
                 },
             )
-        result = pipeline.query(
-            body.question,
-            industry=body.industry,
-            tenants=["public"],
-            answer_model=settings.llm_model,
-            escalation_model=settings.escalation_model,
-        ).to_dict()
+        try:
+            result = pipeline.query(
+                body.question,
+                industry=body.industry,
+                tenants=["public"],
+                answer_model=settings.llm_model,
+                escalation_model=settings.escalation_model,
+            ).to_dict()
+        except LLMUnavailableError:
+            # the question was consumed up front (parallel-overrun safety) but
+            # never answered — give it back before the error handler responds
+            app.state.anon_quota.refund(key)
+            raise
         result["tier"] = "anonymous"
         result["anon_remaining"] = remaining
         return result

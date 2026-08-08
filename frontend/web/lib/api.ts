@@ -101,10 +101,14 @@ export class ApiError extends Error {
 }
 
 export const api = {
-  async register(username: string, password: string) {
+  async register(username: string, password: string, turnstileToken?: string) {
     return request("/auth/register", {
       method: "POST",
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({
+        username,
+        password,
+        ...(turnstileToken ? { turnstile_token: turnstileToken } : {}),
+      }),
     });
   },
   async login(username: string, password: string) {
@@ -118,10 +122,14 @@ export const api = {
     return request<{ username: string; role: string; auth_enabled: boolean }>("/auth/me");
   },
   // anonymous, stateless query — no token, no saved history
-  async queryAnon(question: string, industry?: string) {
+  async queryAnon(question: string, industry?: string, turnstileToken?: string) {
     return request<Answer>("/query", {
       method: "POST",
-      body: JSON.stringify(industry ? { question, industry } : { question }),
+      body: JSON.stringify({
+        question,
+        ...(industry ? { industry } : {}),
+        ...(turnstileToken ? { turnstile_token: turnstileToken } : {}),
+      }),
     });
   },
   async account() {
@@ -134,7 +142,12 @@ export const api = {
     return request("/account/api-key", { method: "DELETE" });
   },
   async health() {
-    return request<{ documents: number; auth_enabled: boolean; llm: string }>("/healthz");
+    return request<{
+      documents: number;
+      auth_enabled: boolean;
+      llm: string;
+      turnstile_sitekey?: string | null;
+    }>("/healthz");
   },
   async listChats() {
     return request<{ conversations: ChatSummary[] }>("/conversations");

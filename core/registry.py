@@ -54,6 +54,11 @@ class Registry:
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
+        # WAL + busy timeout: in the prod compose the registry lives on a
+        # volume shared by the seeder and every api replica, so concurrent
+        # readers/writers must not hit `database is locked`.
+        self._conn.execute("PRAGMA journal_mode = WAL")
+        self._conn.execute("PRAGMA busy_timeout = 5000")
         self._conn.executescript(_SCHEMA)
         self._cipher = cipher
 

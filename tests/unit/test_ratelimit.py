@@ -11,7 +11,7 @@ from starlette.testclient import TestClient
 from api.middleware.ratelimit import RateLimiter
 
 
-def _app(rate_per_min, burst):
+def _app(rate_per_min, burst, trust_proxy=False):
     async def query(request):
         return PlainTextResponse("ok")
 
@@ -20,7 +20,8 @@ def _app(rate_per_min, burst):
 
     app = Starlette(routes=[Route("/query", query, methods=["POST"]),
                             Route("/documents", docs)])
-    app.add_middleware(RateLimiter, rate_per_min=rate_per_min, burst=burst)
+    app.add_middleware(RateLimiter, rate_per_min=rate_per_min, burst=burst,
+                       trust_proxy=trust_proxy)
     return TestClient(app)
 
 
@@ -52,6 +53,25 @@ def test_bucket_refills_over_time():
     assert client.post("/query").status_code == 429
     time.sleep(0.05)  # ~5 tokens refilled
     assert client.post("/query").status_code == 200
+
+
+def test_forwarded_for_is_ignored_unless_trusted():
+    """Default deployment: the header is client-settable, so honouring it would
+    let one caller mint an unlimited supply of fresh buckets."""
+    client = _app(rate_per_min=60, burst=1)
+    assert client.post("/query", headers={"X-Forwarded-For": "1.1.1.1"}).status_code == 200
+    assert client.post("/query", headers={"X-Forwarded-For": "2.2.2.2"}).status_code == 429
+
+
+def test_trusted_proxy_keys_on_the_first_forwarded_hop():
+    """Behind Caddy every request has the same peer address; without this the
+    whole internet would share one bucket."""
+    client = _app(rate_per_min=60, burst=1, trust_proxy=True)
+    a = {"X-Forwarded-For": "1.1.1.1"}
+    assert client.post("/query", headers=a).status_code == 200
+    assert client.post("/query", headers=a).status_code == 429
+    # a different real client, same proxy — unaffected
+    assert client.post("/query", headers={"X-Forwarded-For": "2.2.2.2, 10.0.0.1"}).status_code == 200
 
 
 def test_distinct_bearer_tokens_get_separate_buckets():
