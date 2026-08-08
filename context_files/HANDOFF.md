@@ -1,22 +1,22 @@
 # HANDOFF — continue here
 
-**As of:** 2026-08-08 · last commit `5430a3b` (pushed, `origin/main` in sync) ·
-tag `v1.0.0` · **209 tests pass, 3 skipped** · **live-safety batch Phases 1–7
-of 8 done, Phase 8 partly done — ALL OF IT STILL UNCOMMITTED** (~650 lines
-across 25 tracked files + several untracked). Full plan with every design
-decision: [`PLAN_LIVE_SAFETY.md`](PLAN_LIVE_SAFETY.md) (in this directory).
+**As of:** 2026-08-08 · last commit **`ae5260d`** (the whole live-safety batch,
+**committed but NOT pushed** — `origin/main` is still at `5430a3b`) · tag
+`v1.0.0` · **209 tests pass, 3 skipped** · working tree **clean**. Full plan
+with every design decision: [`PLAN_LIVE_SAFETY.md`](PLAN_LIVE_SAFETY.md).
 
 ### Read this first (state in 6 lines)
 
+- **The batch is DONE — all 8 phases** — and committed as one unit in `ae5260d`
+  (40 files). Working tree is clean.
+- **It has NOT been pushed.** `git push` is the next mechanical step, and it
+  will trigger **the first-ever CI run** (`.github/workflows/ci.yml` has never
+  executed — treat a red first run as expected-ish, not alarming).
 - **Nothing is running.** The prod stack was torn down with `down -v` — no
   containers, no volumes, no smoke-test data. Images `eurag-api` / `eurag-web`
   are still built locally (`linux/arm64`).
-- **Phase 7 (prod bring-up) is DONE and green locally** — full smoke test passed,
-  two real bugs found and fixed. Details below.
-- **Phase 8 is IN PROGRESS**: `docs/DEPLOY.md` is rewritten; **still to do —
-  `docs/DEVLOG.md` batch entry, `docs/SECURITY.md`, then the single commit.**
-- **The live deploy is blocked on the user** creating a GCP VM (see §2 of
-  "What's left"). Oracle is out — signup rejected.
+- **The live deploy is blocked on the user** creating a GCP VM — see
+  "Decisions / inputs waiting on you". Oracle is out (signup rejected).
 - **Do not commit or push unless asked** (standing rule 5).
 - If anything here contradicts [`CLAUDE.md`](../CLAUDE.md), CLAUDE.md wins on
   *standing* guidance; this file wins on *current state*.
@@ -227,18 +227,20 @@ No phase touched retrieval, so the harness rule never applied.
 
 Remaining:
 
-1. **Phase 8 — docs + commit.** `docs/DEPLOY.md` **rewritten** (73 → ~290 lines,
-   2026-07-30, restructured 2026-08-08): seeder + boot order with measured
+1. ~~**Phase 8 — docs + commit.**~~ **DONE 2026-08-08** (commit `ae5260d`).
+   `docs/DEPLOY.md` rewritten (73 → ~290 lines): boot order with measured
    timings, shared-state table incl. `anon_quota`, strict boot +
    `validate_startup`, Turnstile, `trust_proxy` + the Cloudflare-orange-cloud
-   caveat, LLM error taxonomy, backups; **§4 measured sizing**, **§5 GCP
-   free-tier runbook**, **§6 post-credit host options**.
-   **Still to do:** `docs/DEVLOG.md` batch entry; `docs/SECURITY.md` (Turnstile
-   threat model + fail-open rationale, error taxonomy + refund, boot guard, XFF
-   trust model — now with the forged-header result to cite); `.env.example`
-   check. Then stage the untracked `CLAUDE.md` + `context_files/` and commit the
-   batch as **one unit**, gated on `pytest -q` green + `npm run build` clean.
-   Push → first CI run (never verified — CI has never executed).
+   caveat, LLM error taxonomy, backups, **§4 measured sizing**, **§5 GCP
+   free-tier runbook**, **§6 post-credit host options**. `docs/DEVLOG.md` batch
+   entry added. `docs/SECURITY.md` extended with the Turnstile threat model +
+   fail-open rationale, the client-IP trust model (citing the verified
+   forged-header result), the LLM error taxonomy + refund, the boot guard, and
+   5 new breach-scenario rows. `.env.example` cross-checked against
+   `core/config.py` **and** the prod compose — three undocumented vars added
+   (`EURAG_EMBED_MODEL`, `EURAG_STRICT_BOOT`, `EURAG_EXPECT_DOCS`).
+   Gates at commit: 209 passed / 3 skipped, `npm run build` clean.
+   **Remaining: `git push`** — never done, and it fires the first-ever CI run.
 2. **The deploy itself** — target settled 2026-08-08: **GCP `e2-medium`**
    (2 vCPU / 4GB, Ubuntu 24.04, 30GB disk) on the $300/90-day trial credit, plus
    a free subdomain, running the §3 compose stack unchanged.

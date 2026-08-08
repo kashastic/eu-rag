@@ -11,9 +11,9 @@ so instead of guessing. FastAPI backend + a Next.js web app. Corpus is 47
 documents (31 EUR-Lex acts + EC portal pages + open-calls snapshot + 10
 national funding agencies).
 
-**Milestones M1–M6 are all complete** and tagged `v1.0.0`. A **"make it live
-safely" batch is in progress** (Phases 1–7 of 8 done + Phase 8 partly done, all
-uncommitted; the live deploy is blocked on the user creating a GCP VM) — resume from
+**Milestones M1–M6 are all complete** and tagged `v1.0.0`. The **"make it live
+safely" batch is complete** (all 8 phases, commit `ae5260d` — **committed but not
+yet pushed**; the live deploy is blocked on the user creating a GCP VM) — resume from
 [`context_files/HANDOFF.md`](context_files/HANDOFF.md); the approved plan with
 all design decisions is [`context_files/PLAN_LIVE_SAFETY.md`](context_files/PLAN_LIVE_SAFETY.md).
 The repo docs are the single source of truth (there is no external tracker —
