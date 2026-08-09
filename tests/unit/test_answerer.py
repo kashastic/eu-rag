@@ -112,3 +112,64 @@ def test_blank_industry_adds_no_context():
     llm = PromptCapturingLLM(["Answer [1]."])
     answer_question("q", chunks(1), llm, industry="   ")
     assert "sector" not in llm.last_user
+
+
+# --- honest refusals: uncited is valid, but only when it IS a refusal --------
+# SYSTEM_PROMPT asks the model to cite nothing when the sources don't cover the
+# question, so requiring a citation there rejected the model for obeying — and
+# shipped verbatim quotes from the chunks it had just refused to use.
+
+
+def test_uncited_refusal_is_accepted_on_the_first_attempt():
+    llm = FakeLLM(["The sources do not address this.\nINSUFFICIENT_SOURCES"])
+    result = answer_question("q", chunks(2), llm)
+    assert llm.calls == 1  # was 2 (retry) + an extractive downgrade
+    assert result.mode == "llm"
+    assert result.insufficient
+    assert result.insufficient_reason == "marker"
+    assert result.citations == []
+    assert "INSUFFICIENT_SOURCES" not in result.answer
+    # the model's own words survive, not quotes from irrelevant chunks
+    assert result.answer == "The sources do not address this."
+
+
+def test_long_uncited_body_is_still_rejected():
+    """A substantive answer with the marker tacked on is an uncited claim —
+    the exact thing citation enforcement exists to stop. Length is the guard."""
+    essay = "Under EU law the obligation applies in full. " * 20
+    assert len(essay) > 600
+    llm = FakeLLM([f"{essay}\nINSUFFICIENT_SOURCES", f"{essay}\nINSUFFICIENT_SOURCES"])
+    result = answer_question("q", chunks(2), llm)
+    assert llm.calls == 2
+    assert result.mode == "extractive"
+    assert result.insufficient_reason == "uncited"
+
+
+def test_fabricated_citation_inside_a_refusal_is_still_rejected():
+    """`not used` is load-bearing: a refusal citing [9] of 2 sources is a
+    hallucinated marker, not an honest refusal."""
+    llm = FakeLLM(
+        ["I cannot answer, see [9].\nINSUFFICIENT_SOURCES"] * 2
+    )
+    result = answer_question("q", chunks(2), llm)
+    assert llm.calls == 2
+    assert result.mode == "extractive"
+    assert result.insufficient_reason == "uncited"
+
+
+def test_uncited_answer_without_the_marker_is_still_rejected():
+    """No marker means the model thinks it answered — an uncited answer there
+    is a claim with no source, and must not be rescued by this path."""
+    llm = FakeLLM(["Yes, you must appoint one."] * 2)
+    result = answer_question("q", chunks(2), llm)
+    assert llm.calls == 2
+    assert result.mode == "extractive"
+    assert result.insufficient_reason == "uncited"
+
+
+def test_refusal_at_the_length_boundary_is_accepted():
+    body = "x" * 600
+    llm = FakeLLM([f"{body}\nINSUFFICIENT_SOURCES"])
+    result = answer_question("q", chunks(2), llm)
+    assert result.mode == "llm"
+    assert result.insufficient

@@ -42,6 +42,17 @@ message and the user's question."""
 # the model's structured low-confidence signal; stripped before shipping
 INSUFFICIENT_MARKER = "INSUFFICIENT_SOURCES"
 
+# SYSTEM_PROMPT tells the model to cite nothing when the sources genuinely do
+# not cover the question, but validate_answer requires at least one citation —
+# so an honest refusal used to fail validation twice and get downgraded to
+# verbatim quotes from the very chunks it had just refused to use. Such a
+# refusal is now accepted, but only when it is SHORT: a sentence or two is a
+# refusal, whereas a long uncited body is a substantive answer with the marker
+# tacked on, and shipping that would be precisely the uncited claim the whole
+# citation discipline exists to prevent. Over the cap we keep the old
+# behaviour and fall through to the extractive downgrade.
+MAX_UNCITED_REFUSAL_CHARS = 600
+
 
 @dataclass
 class AnswerResult:
@@ -50,8 +61,18 @@ class AnswerResult:
     mode: str = "llm"  # llm | extractive | no_sources
     insufficient: bool = False  # sources didn't answer the core question
     escalated: bool = False  # answered by the escalation model
+    # WHY the answer was insufficient, for telemetry only — the escalation gate
+    # still reads `insufficient` alone. Three causes are worth telling apart:
+    #   "marker"     — the model said the sources don't cover the question
+    #   "uncited"    — two generations failed citation validation
+    #   "no_sources" — retrieval returned nothing at all
+    # They want different fixes ("marker" wants deeper retrieval, "uncited"
+    # wants a better prompt), and until now the log couldn't distinguish them.
+    insufficient_reason: str | None = None
 
     def to_dict(self) -> dict:
+        # insufficient_reason is deliberately NOT exposed: it is an internal
+        # diagnostic, and the API response shape is a published contract.
         return {
             "answer": self.answer,
             "citations": [c.to_dict() for c in self.citations],
@@ -88,7 +109,10 @@ def answer_question(
 ) -> AnswerResult:
     if not chunks:
         return AnswerResult(
-            answer=NO_SOURCES_MESSAGE, mode="no_sources", insufficient=True
+            answer=NO_SOURCES_MESSAGE,
+            mode="no_sources",
+            insufficient=True,
+            insufficient_reason="no_sources",
         )
 
     citations = build_citations(chunks)
@@ -124,13 +148,26 @@ def answer_question(
         if insufficient:
             text = text.replace(INSUFFICIENT_MARKER, "").rstrip()
         ok, reason = validate_answer(text, n_sources=len(chunks))
+        used = markers_used(text)
+        # An honest refusal cites nothing. `not used` also guarantees the only
+        # thing validate_answer could have objected to is the missing citation
+        # — an out-of-range marker means `used` is non-empty, and a fabricated
+        # [9] is still rejected here even inside a refusal.
+        if (
+            not ok
+            and insufficient
+            and not used
+            and len(text) <= MAX_UNCITED_REFUSAL_CHARS
+        ):
+            logger.info("uncited insufficiency accepted as an honest refusal")
+            ok = True
         if ok:
-            used = markers_used(text)
             return AnswerResult(
                 answer=text,
                 citations=[c for c in citations if c.marker in used],
                 mode="llm",
                 insufficient=insufficient,
+                insufficient_reason="marker" if insufficient else None,
             )
         logger.warning("citation validation failed (%s), attempt %d", reason, attempt + 1)
 
@@ -143,4 +180,5 @@ def answer_question(
         citations=[c for c in citations if c.marker in used],
         mode="extractive",
         insufficient=True,
+        insufficient_reason="uncited",
     )

@@ -192,6 +192,9 @@ class Pipeline:
         result = self._answer(
             question, llm, k=self.settings.top_k, industry=industry, tenants=tenants
         )
+        # captured before escalation can overwrite `result`: this is WHY the
+        # expensive path was taken, which the outcome line below reports
+        primary_reason = result.insufficient_reason
         if (
             result.insufficient
             and result.mode != "no_sources"  # empty index — nothing to widen
@@ -222,6 +225,20 @@ class Pipeline:
             else:
                 deeper.escalated = True
                 result = deeper
+        # ONE line per query, unconditionally — this is the denominator. Every
+        # other per-query log fires only on a branch (escalation, a failed
+        # rewrite, an industry tag), so counting escalations against them gave
+        # a ratio with no bottom. Keep it ASCII: the first attempt to grep the
+        # escalation log failed partly on the em dash in the line above.
+        logger.info(
+            "query outcome: mode=%s escalated=%s primary_reason=%s "
+            "insufficient=%s citations=%d",
+            result.mode,
+            result.escalated,
+            primary_reason or "none",
+            result.insufficient,
+            len(result.citations),
+        )
         return result
 
     def _answer(
