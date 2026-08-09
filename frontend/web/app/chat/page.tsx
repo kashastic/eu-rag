@@ -13,7 +13,11 @@ import {
   type HistoryTurn,
 } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
-import { Turnstile, type TurnstileHandle } from "@/components/Turnstile";
+import {
+  Turnstile,
+  TurnstileUnavailableError,
+  type TurnstileHandle,
+} from "@/components/Turnstile";
 
 const STARTERS = [
   "Do I need a data protection officer for a 30-person company?",
@@ -34,16 +38,19 @@ export default function ChatPage() {
   // anonymous mode: ephemeral thread
   const [anonMsgs, setAnonMsgs] = useState<ChatMessage[]>([]);
   const [anonRemaining, setAnonRemaining] = useState<number | null>(null);
-  // bot gate: sitekey comes from /healthz at runtime; tokens are single-use
+  // bot gate: sitekey comes from /healthz at runtime. The widget is invisible
+  // and only runs at submit time, so nothing here gates the composer.
   const [sitekey, setSitekey] = useState<string | null>(null);
-  const [tsToken, setTsToken] = useState<string | null>(null);
   const tsRef = useRef<TurnstileHandle>(null);
+  // true only while Cloudflare has an interactive challenge on screen
+  const [challenging, setChallenging] = useState(false);
 
   const [pending, setPending] = useState(false);
   const [question, setQuestion] = useState("");
   const [industry, setIndustry] = useState("");
   const [loginOpen, setLoginOpen] = useState(false);
   const [loginForced, setLoginForced] = useState(false);
+  const [loginMode, setLoginMode] = useState<"login" | "register">("login");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const threadRef = useRef<HTMLDivElement>(null);
 
@@ -65,6 +72,15 @@ export default function ChatPage() {
       }
     } else {
       setAuthed(false);
+      // /login redirects here with ?auth=login|register — one sign-in UI, one
+      // place to keep working. Read off location rather than useSearchParams so
+      // this client page needs no Suspense boundary to build.
+      const want = new URLSearchParams(window.location.search).get("auth");
+      if (want === "login" || want === "register") {
+        setLoginMode(want);
+        setLoginOpen(true);
+        window.history.replaceState(null, "", window.location.pathname);
+      }
     }
     setReady(true);
   }, []);
@@ -116,8 +132,6 @@ export default function ChatPage() {
   async function send(text: string) {
     const q = text.trim();
     if (!q || pending) return;
-    // anon with an unsolved widget: keep the question, Ask stays disabled
-    if (!authed && sitekey && !tsToken) return;
     setQuestion("");
     const userMsg: ChatMessage = {
       role: "user",
@@ -131,26 +145,24 @@ export default function ChatPage() {
       setAnonMsgs((m) => [...m, userMsg]);
       setPending(true);
       try {
+        // one fresh single-use token per question, minted here rather than on
+        // page load — the visitor only ever sees the widget if Cloudflare asks
+        const token = sitekey ? await tsRef.current?.getToken() : undefined;
         // anonMsgs here is still the pre-question state, which is exactly the
         // history to resolve this follow-up against
-        const ans = await api.queryAnon(
-          q,
-          industry || undefined,
-          tsToken ?? undefined,
-          toHistory(anonMsgs)
-        );
+        const ans = await api.queryAnon(q, industry || undefined, token, toHistory(anonMsgs));
         setAnonMsgs((m) => [...m, answerToMsg(ans)]);
         if (typeof ans.anon_remaining === "number") setAnonRemaining(ans.anon_remaining);
       } catch (err) {
         if (err instanceof ApiError && err.code === "anonymous_limit_reached") {
           setLoginForced(true);
+          setLoginMode("register");
           setLoginOpen(true);
         } else {
           setAnonMsgs((m) => [...m, errMsg(err)]);
         }
       } finally {
         setPending(false);
-        tsRef.current?.reset(); // tokens are single-use — re-arm for the next question
       }
       return;
     }
@@ -219,7 +231,14 @@ export default function ChatPage() {
         ) : (
           <div className="anon-side">
             <p>You&apos;re browsing anonymously. Your chats aren&apos;t saved.</p>
-            <button className="btn" onClick={() => { setLoginForced(false); setLoginOpen(true); }}>
+            <button
+              className="btn"
+              onClick={() => {
+                setLoginForced(false);
+                setLoginMode("login");
+                setLoginOpen(true);
+              }}
+            >
               Sign in to save chats
             </button>
           </div>
@@ -255,7 +274,7 @@ export default function ChatPage() {
             )}
             {pending && (
               <p className="pending">
-                Consulting the corpus
+                {challenging ? "Waiting for the Cloudflare check below" : "Consulting the corpus"}
                 <span className="spin"><span>.</span><span>.</span><span>.</span></span>
               </p>
             )}
@@ -265,7 +284,7 @@ export default function ChatPage() {
         <div className="composer">
           <div className="composer-inner">
             {!authed && sitekey && (
-              <Turnstile ref={tsRef} sitekey={sitekey} onToken={setTsToken} />
+              <Turnstile ref={tsRef} sitekey={sitekey} onInteractive={setChallenging} />
             )}
             <div className="industry-row">
               <label htmlFor="ind">Industry · optional</label>
@@ -293,10 +312,7 @@ export default function ChatPage() {
                   }
                 }}
               />
-              <button
-                onClick={() => send(question)}
-                disabled={pending || (!authed && !!sitekey && !tsToken)}
-              >
+              <button onClick={() => send(question)} disabled={pending}>
                 Ask
               </button>
             </div>
@@ -308,6 +324,7 @@ export default function ChatPage() {
       {loginOpen && (
         <LoginModal
           forced={loginForced}
+          initialMode={loginMode}
           sitekey={sitekey}
           onClose={() => setLoginOpen(false)}
           onSuccess={onLoggedIn}
@@ -352,42 +369,55 @@ function answerToMsg(ans: Awaited<ReturnType<typeof api.queryAnon>>): ChatMessag
   };
 }
 function errMsg(err: unknown): ChatMessage {
-  const m = err instanceof ApiError ? err.message : "Request failed";
-  return { role: "assistant", content: `_${m}_`, citations: [], meta: {}, created_at: 0 };
+  const m =
+    err instanceof ApiError || err instanceof TurnstileUnavailableError
+      ? err.message
+      : "Request failed";
+  // renderMarkdown only italicises *…*, not _…_ — underscores would show raw
+  return { role: "assistant", content: `*${m}*`, citations: [], meta: {}, created_at: 0 };
 }
 
 function LoginModal({
   forced,
+  initialMode,
   sitekey,
   onClose,
   onSuccess,
 }: {
   forced: boolean;
+  initialMode: "login" | "register";
   sitekey: string | null;
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const [mode, setMode] = useState<"login" | "register">(forced ? "register" : "login");
+  const [mode, setMode] = useState<"login" | "register">(forced ? "register" : initialMode);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  // bot gate on account creation (login is not gated)
-  const [tsToken, setTsToken] = useState<string | null>(null);
+  // bot gate on account creation (login is not gated). Invisible: it runs on
+  // submit, so the button below is never disabled waiting for a challenge.
   const tsRef = useRef<TurnstileHandle>(null);
+  const [challenging, setChallenging] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setBusy(true);
     try {
-      if (mode === "register") await api.register(username, password, tsToken ?? undefined);
+      if (mode === "register") {
+        const token = sitekey ? await tsRef.current?.getToken() : undefined;
+        await api.register(username, password, token);
+      }
       await api.login(username, password);
       onSuccess();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Something went wrong");
+      setError(
+        err instanceof ApiError || err instanceof TurnstileUnavailableError
+          ? err.message
+          : "Something went wrong"
+      );
       setBusy(false);
-      tsRef.current?.reset(); // token spent server-side — re-arm before retry
     }
   }
 
@@ -409,14 +439,11 @@ function LoginModal({
           <input id="mp" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </div>
         {mode === "register" && sitekey && (
-          <Turnstile ref={tsRef} sitekey={sitekey} onToken={setTsToken} />
+          <Turnstile ref={tsRef} sitekey={sitekey} onInteractive={setChallenging} />
         )}
+        {challenging && <p className="hint">Complete the check above to continue.</p>}
         {error && <p className="err">{error}</p>}
-        <button
-          className="btn"
-          type="submit"
-          disabled={busy || (mode === "register" && !!sitekey && !tsToken)}
-        >
+        <button className="btn" type="submit" disabled={busy}>
           {busy ? "…" : mode === "login" ? "Sign in" : "Create account"}
         </button>
         <button className="btn google" type="button" disabled title="Configure a Google OAuth client to enable">

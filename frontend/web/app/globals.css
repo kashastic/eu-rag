@@ -59,6 +59,7 @@ a { color: var(--navy); }
 .switch { text-align: center; margin-top: 16px; font-size: 14px; color: var(--muted); }
 .switch button { background: none; border: none; color: var(--navy); cursor: pointer; font: inherit; text-decoration: underline; }
 .err { color: var(--red-ink); font-size: 13px; margin: 8px 0 0; }
+.hint { color: var(--muted); font-size: 13px; font-style: italic; margin: 0 0 8px; text-align: center; }
 
 /* ---------- app shell ---------- */
 .shell { display: grid; grid-template-columns: 280px 1fr; height: 100vh; }
@@ -179,6 +180,15 @@ a { color: var(--navy); }
 .inputrow button:hover:not(:disabled) { background: var(--gold); color: var(--ink); }
 .inputrow button:disabled { opacity: .45; cursor: wait; }
 .disclaimer { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-top: 8px; text-align: center; }
+
+/* ---------- bot gate ---------- */
+/* The Turnstile widget runs at submit time and only paints anything when
+   Cloudflare asks this visitor to interact, so the container claims no space
+   until it does (measured: 0px tall idle). `.active` is set from Turnstile's
+   before/after-interactive callbacks — the widget renders into a shadow root,
+   so there is no child selector to hang the spacing off. */
+.turnstile { display: flex; justify-content: center; }
+.turnstile.active { margin-bottom: 12px; }
 
 .spin { display: inline-block; }
 .spin span { animation: blink 1.4s infinite both; }
