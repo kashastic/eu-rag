@@ -31,17 +31,21 @@ _DECOMPOSE_SYSTEM = (
 )
 
 _CONTEXTUALIZE_SYSTEM = (
-    "You rewrite a follow-up question so it stands on its own, using the "
+    "You rewrite a follow-up question into a standalone question, using the "
     "conversation that came before it.\n"
-    "Resolve pronouns and elliptical references ('what about 29?', 'and "
-    "then?', 'is that still true in France?') into the full subject, and "
-    "carry over the legal topic the conversation is about.\n"
-    "Rules: output ONLY the rewritten question, one line, no preamble and no "
-    "explanation. Keep the user's own wording and specifics wherever you can "
-    "— you are resolving references, not rephrasing or answering. Never add "
-    "facts, article numbers, or legal conclusions that the conversation does "
-    "not already contain. If the question already stands on its own, output "
-    "it unchanged."
+    "The result must make sense to someone who has NOT seen the "
+    "conversation: resolve pronouns and elliptical references, and state the "
+    "legal topic explicitly. For example, after a conversation about data "
+    "protection officers, the follow-up 'what if I have 29 people?' becomes "
+    "'Do I need a data protection officer for a company with 29 employees?'\n"
+    "Write it in the same language as the follow-up question. Resolving "
+    "references is not translating: an English follow-up must produce an "
+    "English question, even when the earlier turns or the legal texts "
+    "discussed are in another language.\n"
+    "Output ONLY the rewritten question, on one line, with no preamble and no "
+    "explanation. Do not answer it, and do not add facts, article numbers, or "
+    "legal conclusions the conversation does not already contain. If the "
+    "question is already fully self-contained, output it unchanged."
 )
 
 
@@ -57,6 +61,12 @@ class QueryContextualizer:
 
     Prior answers are included but truncated: they are model output being fed
     back into a prompt, and only their topic is load-bearing here.
+
+    The rewrite MUST preserve the question's language. `answerer` promises to
+    answer in the language the question was asked in, but it only ever sees
+    this rewrite — so a translation here silently defeats that guarantee
+    downstream. Observed in production: an English follow-up came back in
+    Spanish (docs/UPDATE_LOG.md, 2026-08-09).
     """
 
     #: prior turns are trimmed before they reach the prompt — the topic is

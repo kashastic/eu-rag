@@ -77,6 +77,20 @@ def test_contextualizer_rejects_unusable_rewrites():
         assert out == "follow up?", f"should have rejected {bad[:30]!r}"
 
 
+def test_contextualizer_instructs_the_model_to_keep_the_language():
+    """`answerer` promises to answer in the language the question was asked in,
+    but it only ever sees the rewrite — so if this step translates, that
+    promise is silently broken downstream. It was: an English follow-up came
+    back answered in Spanish in production (2026-08-09). Behaviour depends on
+    a model, so what is asserted here is that the constraint is still in the
+    prompt at all — deleting the line would reintroduce the bug invisibly."""
+    from core.retrieval.expansion import _CONTEXTUALIZE_SYSTEM
+
+    lowered = _CONTEXTUALIZE_SYSTEM.lower()
+    assert "same language as the follow-up question" in lowered
+    assert "not translating" in lowered
+
+
 def test_contextualizer_bounds_what_reaches_the_prompt():
     """History is client-supplied text going into a prompt: only the last few
     turns are used and answers are truncated."""
