@@ -30,11 +30,16 @@ Verified in Chrome, four failure modes that all previously showed nothing:
 | duplicate username (string 422) | *(nothing)* | "username already taken" |
 | wrong password (401) | *(nothing)* | "invalid credentials" |
 
-Also renamed the answer badge `★ escalated` → **`★ stronger model consulted`**
-(with a tooltip) — "escalated" is our word for it, not the reader's. Confirmed
-on a live escalating question (the Late Payment statutory-interest one). The
-static local UI already said "escalated to stronger model"; the web app was the
-odd one out.
+Also cleaned up the answer badges. `★ escalated` → **`★ stronger model
+consulted`** (with a tooltip) — "escalated" is our word for it, not the
+reader's; the static local UI already spelled it out and the web app was the odd
+one out. And **`mode: llm` is gone**: three modes exist (`llm`, `extractive`,
+`no_sources`), but `llm` is every ordinary answer, so the badge was noise on all
+of them. The badge now shows only for `extractive` — "verbatim quotes", which
+genuinely changes how to read what follows — while `no_sources` already speaks
+through the insufficient badge. Both branches verified in the browser: a normal
+answer carries no mode badge, and a keyless backend (`llm: extractive`) shows
+"verbatim quotes".
 
 ## 2026-08-09 (web UI) — the bot gate stops being the front door
 

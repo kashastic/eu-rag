@@ -575,9 +575,21 @@ function Message({ msg }: { msg: ChatMessage }) {
       <div className="who">EURAG</div>
       <div className="answer" onClick={onMarkerClick}>
         <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
-        {(msg.meta.escalated || msg.meta.insufficient || msg.meta.mode) && (
+        {(msg.meta.escalated || msg.meta.insufficient || msg.meta.mode === "extractive") && (
           <div className="flags">
-            {msg.meta.mode && <span className="flag">mode: {msg.meta.mode}</span>}
+            {/* mode is only worth surfacing when it is NOT the normal one:
+                "llm" is every ordinary answer, so the badge was noise on all of
+                them. "extractive" genuinely changes how to read what follows —
+                it is text quoted straight from the sources, not written prose.
+                "no_sources" already speaks through the insufficient badge. */}
+            {msg.meta.mode === "extractive" && (
+              <span
+                className="flag"
+                title="This answer is text quoted directly from the sources, not written by the model."
+              >
+                verbatim quotes
+              </span>
+            )}
             {msg.meta.escalated && (
               <span
                 className="flag escalated"
