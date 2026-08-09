@@ -133,7 +133,7 @@ class Settings:
     # Anonymous users get this many full-quality questions (the Sonnet→Opus
     # cascade), counted server-side per IP/day, before a login wall.
     free_anon_questions: int = field(
-        default_factory=lambda: int(os.environ.get("EURAG_FREE_ANON_QUESTIONS", "3"))
+        default_factory=lambda: int(os.environ.get("EURAG_FREE_ANON_QUESTIONS", "2"))
     )
     # Logged-in free tier answers with this cheap model and no escalation.
     # BYOK users get the full cascade on their own key instead.

@@ -97,7 +97,7 @@ auto-secrets silently break multi-instance login), and warns when
 
 ### Access tiers, bot gate, and client IPs
 
-Anonymous visitors get `EURAG_FREE_ANON_QUESTIONS` (default 3) full-quality
+Anonymous visitors get `EURAG_FREE_ANON_QUESTIONS` (default 2) full-quality
 questions, enforced **server-side per IP/day**; then a login wall. Logged-in
 users are on Haiku (free) unless they add their own Anthropic key (BYOK, full
 cascade on their bill). See [`SECURITY.md`](SECURITY.md) for the threat model.

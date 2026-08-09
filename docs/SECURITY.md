@@ -46,7 +46,7 @@ The hosted deployment lets anyone try the product without an account, which is
 also the surface a malicious user would use to burn the owner's Anthropic
 credits. Defense:
 
-- **Anonymous tier**: `EURAG_FREE_ANON_QUESTIONS` (default 3) full-quality
+- **Anonymous tier**: `EURAG_FREE_ANON_QUESTIONS` (default 2) full-quality
   questions, **counted server-side per client IP per day** (`core/quota.py`, on
   the shared DB — the browser popup only reflects this, it never enforces it).
   Spent → 401 `anonymous_limit_reached` → login wall.

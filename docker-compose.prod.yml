@@ -71,6 +71,11 @@ services:
       # share Caddy's single rate-limit bucket and quota key
       EURAG_TRUST_PROXY: "true"
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      # Free anonymous questions per IP/day, billed to the server's key. Listed
+      # here explicitly because the container gets no env_file — without this
+      # line, setting it in the VM's .env changes nothing and the code default
+      # silently wins. 0 = BYOK-only.
+      EURAG_FREE_ANON_QUESTIONS: ${EURAG_FREE_ANON_QUESTIONS:-2}
       # bot gate on the anon funnel + registration; empty = off (see .env.example)
       EURAG_TURNSTILE_SITEKEY: ${EURAG_TURNSTILE_SITEKEY:-}
       EURAG_TURNSTILE_SECRET: ${EURAG_TURNSTILE_SECRET:-}
