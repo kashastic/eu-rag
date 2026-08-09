@@ -128,7 +128,17 @@ class Pipeline:
         return True
 
     def erase_tenant(self, tenant: str) -> int:
-        """Erase every document in a tenant (user account deletion)."""
+        """Erase every document in a tenant (user account deletion).
+
+        Refuses the public tenant at the floor, so no caller can delete the
+        official corpus. This is not theoretical: a user's tenant *is* their
+        username, and "public" satisfies the username rule — without this,
+        self-service account deletion by a user registered as `public` would
+        erase all 47 documents. The admin route guards separately; this is the
+        guard that holds for every caller.
+        """
+        if tenant == "public":
+            raise ValueError("refusing to erase the public corpus")
         doc_ids = self.registry.tenant_doc_ids(tenant)
         for doc_id in doc_ids:
             self.erase_document(doc_id)

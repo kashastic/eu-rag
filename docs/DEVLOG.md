@@ -2,6 +2,72 @@
 
 Running log of build sessions. Newest first.
 
+## 2026-08-10 (privacy) — the paperwork, and the erasure it promises
+
+Started from a question — *every site asks for cookie consent, why don't we?* —
+and the audit answered it the other way round. EURAG sets **no cookies**, has
+no analytics and no tracker; the only device storage is the session pair in
+`localStorage`, which ePrivacy exempts. So no banner. What it *did* have was a
+pile of personal data with no notice anywhere: client IP as the anon-quota key,
+usernames, Google emails, saved chat text, the encrypted BYOK key, the audit
+log — and **every question going to Anthropic in the US**, which the site never
+mentioned. Reasoning and the do-not-reverse note: `docs/UPDATE_LOG.md`.
+
+**Shipped**
+
+- `/privacy` and `/terms` (`app/{privacy,terms}/page.tsx`, shared constants in
+  `lib/legal.ts`), linked from the composer disclaimer so anonymous visitors
+  reach them. Every claim on the pages maps to something in the code.
+- `DELETE /account` — self-service erasure of account, refresh tokens, saved
+  chats, uploaded documents, stored key and the lifetime quota row, gated on
+  the user typing their username back (works for Google accounts, which have no
+  password to re-enter). Two-step UI in the settings dialog.
+- The audit trail survives erasure **pseudonymised** (`actor` →
+  `deleted_account`) rather than deleted, so deleting an account can't erase
+  the evidence of an attack.
+
+**Three things the work turned up that review wouldn't have**
+
+1. **`erase_tenant("public")` was reachable from a user action.** A user's
+   tenant is their username and `public` satisfies the username rule, so an
+   account called `public` deleting itself would have erased all 47 official
+   documents. The guard now sits inside `Pipeline.erase_tenant`, not only on
+   the admin route.
+2. **A stateless JWT outlives the account it names.** The erasure test failed
+   on `GET /account` → **200 for a deleted user**: the 15-minute access token
+   is validated by signature alone. `api/deps._still_exists` now checks the
+   user row on every authenticated request — one PK lookup, accepted because
+   `/privacy` now promises "immediate", and the ask path already did a lookup.
+3. **SECURITY.md was claiming a control that does not exist** — "audit log
+   append-only (SQLite triggers block UPDATE/DELETE)". `grep -r TRIGGER` finds
+   nothing in `core/` or `api/`, and never did. Corrected to what is actually
+   true: append-only by discipline, one deliberate update path.
+
+**Then the two follow-ups, same session.**
+
+**Fonts self-hosted.** `app/layout.tsx` had been loading three families from
+`fonts.googleapis.com`, so Google got every visitor's IP on every page view —
+the one claim on /privacy that would have been a promise rather than a fact.
+Now `app/fonts.css` (generated, 26 `@font-face` rules) + 26 woff2 files in
+`public/fonts/`, **988 KB on disk, ~356 KB fetched by a Latin-alphabet
+visitor** — the same bytes Google was serving, since its `unicode-range` rules
+are kept verbatim. Dropped the vietnamese subset (not an EU language) and
+collapsed variable-font weights that shared a file from three rules to one
+`font-weight: 400 700`, which is where the 48-files-for-33-URLs duplication
+went. Verified against a running `next start`: the page's CSS references
+`/fonts/…`, and one woff2 serves `200 font/woff2 122168 bytes` from our origin.
+The only `fonts.googleapis.com` string left in the build is Next's own
+font-optimizer checking for a `<link>` we no longer emit.
+
+**Reserved usernames.** A username is an identifier here — `register` sets
+`tenant = username` and the audit log keys on it — so `public` and
+`deleted_account` are now refused at registration *and* skipped when deriving a
+name from a Google profile (`public@` at a Workspace domain → `public2`).
+
+Tests **277 passed / 7 skipped** (+15, `tests/test_account_deletion.py`);
+`next build` clean, `/privacy` and `/terms` prerendered static. No retrieval
+change, so no harness run.
+
 ## 2026-08-09 (auth) — Google sign-in, and no client secret to hold
 
 The "Continue with Google (coming soon)" button had been disabled since M5.

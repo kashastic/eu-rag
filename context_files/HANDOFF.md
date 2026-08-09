@@ -1,7 +1,14 @@
 # HANDOFF — continue here
 
 **As of:** 2026-08-10 · **EURAG is LIVE** at <https://eurag.duckdns.org> ·
-prod runs `7392001` (== `origin/main`) · **262 tests pass, 7 skipped** locally.
+prod runs `7392001`; `main` is ahead by the docs commit and the privacy batch ·
+**272 tests pass, 7 skipped** locally.
+
+> **Uncommitted and not deployed:** the privacy/terms/erasure work below is in
+> the working tree only, and **`CONTACT_EMAIL` in
+> `frontend/web/lib/legal.ts` is still `privacy@example.invalid`**. Set it to a
+> real address before deploying — a published privacy notice with a dead
+> contact is worse than none.
 
 Read [`CLAUDE.md`](../CLAUDE.md) first for standing rules — it wins on *how to
 work here*; this file wins on *what is true right now*. Build history with
@@ -166,6 +173,38 @@ purpose (two SQLite, one Postgres).
 
 ---
 
+## What shipped 2026-08-10 (privacy batch, not yet deployed)
+
+Prompted by "why don't we ask for cookie consent?" — the audit answered it in
+reverse. EURAG sets **no cookies**, runs no analytics and carries no tracker,
+so there is nothing to consent to and **deliberately no banner** (do not "fix"
+this later — `docs/UPDATE_LOG.md`). The actual gap was transparency.
+
+- **`/privacy` and `/terms`** — what is stored, for how long, and that every
+  question goes to **Anthropic in the US**, which the site had never said.
+  Linked from the composer disclaimer, so anonymous visitors reach them.
+- **`DELETE /account`** — self-service erasure (account, refresh tokens, saved
+  chats, uploaded docs, stored key, lifetime quota row), confirmed by typing
+  the username. Two-step control in the settings dialog. The audit trail
+  survives **pseudonymised**, so deletion can't erase evidence of an attack.
+- **Two live defects found on the way**: `erase_tenant("public")` was reachable
+  from a user action (a user's tenant *is* their username and `public` is
+  registerable — it would have erased all 47 documents), and a stateless
+  15-minute JWT kept working after its account was deleted. Both fixed;
+  `api/deps._still_exists` now costs one PK lookup per authed request.
+- **SECURITY.md was documenting a control that doesn't exist** — "audit log
+  append-only (SQLite triggers block UPDATE/DELETE)". There are no such
+  triggers anywhere in the code. Corrected.
+
+- **Fonts are self-hosted now** (`app/fonts.css` + `public/fonts/`, 26 files).
+  A page view makes **no third-party request at all**; Turnstile fires at
+  submit and Google Identity Services only after "Continue with Google".
+- **`public` and `deleted_account` are reserved usernames** — a username is a
+  tenant id and an audit actor, not a label.
+
+**Before this goes live:** set `CONTACT_EMAIL` (open item 6). That is the only
+blocker.
+
 ## Open work, in priority order
 
 1. **Billing alerts — still not set.** The one genuinely unbounded risk. A
@@ -208,6 +247,9 @@ purpose (two SQLite, one Postgres).
 5. **90-day credit cliff** — trial started 2026-08-08, so **~2026-11-06**.
    Landing spot is Hetzner `CAX21` (~€7/mo, ARM — the original images were built
    arm64). `docs/DEPLOY.md` §6.
+6. **Set `CONTACT_EMAIL`** in `frontend/web/lib/legal.ts` — currently
+   `privacy@example.invalid`. Use an address that can absorb spam. This is the
+   only thing blocking the privacy batch from deploying.
 
 **Deferred:** password accounts have no email → **no password reset** (lose the
 password, lose the saved chats). This is now *narrower* than it was — Google

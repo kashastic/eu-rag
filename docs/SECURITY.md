@@ -27,12 +27,35 @@ and verified against a running production stack, not only in unit tests.
 - **At-rest encryption** — AES-256-GCM for chunk text when
   `EURAG_ENCRYPTION_KEY` is set, transparent at the registry boundary.
   Version-prefixed ciphertext so plaintext and encrypted rows coexist.
-- **Audit log** — append-only (SQLite triggers block UPDATE/DELETE), records
-  who/what/when for register, login, query, ingest, PII rejection, erasure.
-  Question texts are stored as SHA-256 hashes, never plaintext.
-- **Erasure (GDPR Art. 17)** — deletes registry rows + vector points + live
-  BM25 entries; per-document (owner or admin) or whole-tenant (admin, for
-  account deletion). Audit records the event, not the content.
+- **Audit log** — append-only *by discipline*, records who/what/when for
+  register, login, query, ingest, PII rejection, erasure. Question texts are
+  stored as SHA-256 hashes, never plaintext. **No audit row is ever deleted**,
+  and the single update path is `AuthStore.erase_user`, which rewrites `actor`
+  to `deleted_account` when an account is erased. (This entry previously
+  claimed SQLite triggers enforced append-only; no such triggers exist in the
+  code and none ever did — corrected 2026-08-10.)
+- **Erasure (GDPR Art. 17)** — three routes, all deleting registry rows +
+  vector points + live BM25 entries:
+  - per-document (owner or admin),
+  - whole-tenant (admin: `DELETE /admin/tenants/{tenant}`),
+  - **self-service account deletion** (`DELETE /account`) — account, refresh
+    tokens, saved chats, uploaded documents, stored BYOK key and the lifetime
+    quota row, gated on the user typing their username back. Sessions end at
+    once: `api/deps._still_exists` rejects a signed token whose account is
+    gone, so a 15-minute access token cannot outlive the account.
+  `Pipeline.erase_tenant` refuses the `public` tenant at the floor — a user's
+  tenant is their username and `public` is a registerable one. Audit records
+  the event, not the content. Tests: `tests/test_account_deletion.py`.
+- **Privacy notice** — `/privacy` and `/terms` state what is stored, for how
+  long, and that questions are processed by Anthropic in the US. No cookies,
+  no analytics, no tracker, and therefore deliberately no consent banner (see
+  `docs/UPDATE_LOG.md`, 2026-08-10). **No third-party request on a page
+  view**: web fonts are self-hosted (`app/fonts.css` + `public/fonts/`), and
+  the only outbound calls are Cloudflare Turnstile at submit time and Google
+  Identity Services after the user clicks "Continue with Google".
+- **Reserved usernames** — a username is an identifier (it becomes the tenant
+  id and the audit actor), so `public` and `deleted_account` are refused at
+  registration and skipped when deriving a name from a Google profile.
 - No personal data in the official corpus; provenance on every chunk;
   citation validation; extractive zero-hallucination fallback.
 

@@ -66,7 +66,7 @@ cd frontend/web && npm install && npm run build   # or: npm run dev
 | `api/` | `main`, `deps` (auth/tenant/tier), `routes/*`, `middleware/` (ratelimit, headers) |
 | `data/` | `scrapers/` (eurlex, portals, funding_calls, common), `samples/`, `seed.py` |
 | `frontend/static/` | zero-dep chat UI (local single-user mode) |
-| `frontend/web/` | Next.js app (accounts, Google sign-in, saved chats, tiers) |
+| `frontend/web/` | Next.js app (accounts, Google sign-in, saved chats, tiers, `/privacy` + `/terms`) |
 | `tests/` | unit + integration; `test_security`, `test_tiers`, `test_google_signin`, `test_postgres` |
 
 ## How it works (the load-bearing bits)
@@ -260,6 +260,23 @@ Full reasoning, symptoms, and the decisions behind them:
   sitekey `1x00000000000000000000AA` / `3x00000000000000000000FF`, secret
   `1x0000000000000000000000000000000AA` — passed **on the command line, never
   in `.env`**.
+- **There is deliberately no cookie banner.** EURAG sets no cookies, runs no
+  analytics and has no tracker; the only device storage is the session tokens
+  in `localStorage`, which ePrivacy exempts as strictly necessary. A consent
+  banner would be managing consent that isn't being collected — on a
+  compliance product. Adding analytics is what would reopen this
+  (`docs/UPDATE_LOG.md`, 2026-08-10). The real obligation was transparency, and
+  it lives in `/privacy` + `/terms`.
+- **A user's tenant IS their username**, and the audit log keys on it too — so
+  a username is an identifier, not a label. `RESERVED_USERNAMES` (`public`,
+  `deleted_account`) is refused by `register` **and** skipped by the
+  Google-derived `_free_username`; `Pipeline.erase_tenant` refuses `public` at
+  the floor as a second layer. Anything new that keys on a username string
+  belongs in that set.
+- **A signed JWT is not proof the account exists.** Access tokens are stateless
+  and live 15 minutes, so `api/deps._still_exists` checks the user row on every
+  authenticated request — otherwise a deleted account keeps a working session
+  (and a freshly reset free-question quota). Don't remove it to save a lookup.
 - **HyDE / expansion default ON** (Haiku); decomposition is built but ships OFF
   (measured: no gain over HyDE).
 - Two known phrase-precision misses (GDPR Art. 6 lawful-bases, Late Payment
@@ -305,6 +322,15 @@ Standing gaps, in rough priority order:
 4. **Sizing numbers are macOS-measured** — `docs/DEPLOY.md` §4 should be
    re-measured on the Linux host.
 5. **The 90-day credit cliff** (trial started 2026-08-08) — `docs/DEPLOY.md` §6.
+
+6. **`CONTACT_EMAIL` in `frontend/web/lib/legal.ts` is a placeholder** — the
+   privacy notice has no working contact route until it is a real address.
+
+**Fonts are self-hosted** (`frontend/web/app/fonts.css` + `public/fonts/`) —
+generated, not hand-written; the header comment says how to refresh them. Do
+not "simplify" this back to a `fonts.googleapis.com` `<link>`: that leaked
+every visitor's IP to Google on every page view, and `/privacy` now states in
+writing that it doesn't happen.
 
 Deferred: password accounts have no email, so **no password reset** (narrower
 than it was — Google sign-in gives new users a recovery-capable route — but it

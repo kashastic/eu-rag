@@ -6,6 +6,10 @@
 - auth enabled → a valid Bearer access token is required; anything else is
   401. `allowed_tenants` then derives what that identity may read, and every
   route funnels through it — tenant scoping is defined once, here.
+
+A valid signature is necessary but not sufficient: the account must also still
+exist, so that erasing one ends its sessions immediately rather than 15 minutes
+later (`_still_exists`).
 """
 
 from fastapi import Depends, Header, HTTPException, Request
@@ -23,9 +27,26 @@ def current_principal(
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="missing bearer token")
     try:
-        return store.verify_access(authorization.split(" ", 1)[1].strip())
+        principal = store.verify_access(authorization.split(" ", 1)[1].strip())
     except AuthError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from None
+    return _still_exists(store, principal)
+
+
+def _still_exists(store: AuthStore, principal: Principal) -> Principal:
+    """Reject a token whose account has been erased.
+
+    Access tokens are stateless by design and live for 15 minutes, so without
+    this an account deleted under DELETE /account keeps a working session for
+    up to a quarter of an hour: it could still ask questions (on a quota row
+    that erasure reset), and the UI would still show it as signed in. "Deleted
+    immediately" has to mean immediately, so an authenticated request pays one
+    primary-key lookup. Anonymous requests never reach here, and the ask path
+    was already doing a lookup of its own (`paid_tier` → `get_byok`).
+    """
+    if not store.user_exists(principal.username):
+        raise HTTPException(status_code=401, detail="account no longer exists")
+    return principal
 
 
 def optional_principal(
@@ -40,10 +61,12 @@ def optional_principal(
         return None
     if not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="malformed authorization header")
+    store: AuthStore = request.app.state.auth
     try:
-        return request.app.state.auth.verify_access(authorization.split(" ", 1)[1].strip())
+        principal = store.verify_access(authorization.split(" ", 1)[1].strip())
     except AuthError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from None
+    return _still_exists(store, principal)
 
 
 def peer_ip(request: Request, trust_proxy: bool) -> str:

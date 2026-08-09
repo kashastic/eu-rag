@@ -16,6 +16,16 @@ class ApiKeyBody(BaseModel):
     api_key: str = Field(min_length=20, max_length=400)
 
 
+class DeleteAccountBody(BaseModel):
+    """Typed confirmation. Not a CSRF defence — the session is a bearer token in
+    localStorage, so there is nothing for a cross-site form to ride — but an
+    irreversible, unrecoverable action should take more than one click, and
+    asking for the *username* works for Google accounts too (they have no
+    password to re-enter)."""
+
+    confirm_username: str
+
+
 @router.get("/account")
 def account(request: Request, p: Principal = Depends(current_principal)):
     auth = request.app.state.auth
@@ -59,3 +69,42 @@ def clear_key(request: Request, p: Principal = Depends(current_principal)):
     request.app.state.auth.clear_byok(p.username)
     request.app.state.auth.audit(p.username, "account.byok_cleared")
     return {"tier": "free", "has_api_key": False}
+
+
+@router.delete("/account")
+def delete_account(
+    body: DeleteAccountBody,
+    request: Request,
+    p: Principal = Depends(current_principal),
+):
+    """Erase the account and everything attached to it (GDPR Art. 17).
+
+    Deletion order is deliberate — content first, account row last — so that a
+    failure part-way through leaves a usable account with some data missing,
+    never a login whose data has vanished. The user's tenant *is* their
+    username (see `AuthStore.register`), which is what makes one call able to
+    reach their uploaded documents.
+
+    What survives, on purpose: the audit trail, pseudonymised to
+    `deleted_account` (see `AuthStore.erase_user`), and anything already sent
+    to Anthropic to answer a question, which we cannot reach. Both are stated
+    in /privacy.
+    """
+    if request.app.state.auth is None:
+        raise HTTPException(status_code=404, detail="auth is disabled on this instance")
+    if body.confirm_username.strip().lower() != p.username:
+        raise HTTPException(
+            status_code=422,
+            detail="type your username exactly to confirm deletion",
+        )
+
+    state = request.app.state
+    chats = state.conversations.erase_user(p.username) if state.conversations else 0
+    # `erase_tenant` refuses "public" outright; skip it rather than 500 so an
+    # account that landed on the public tenant can still be deleted.
+    docs = 0 if p.tenant == "public" else state.pipeline.erase_tenant(p.tenant)
+    if state.user_quota is not None:
+        state.user_quota.erase_user(p.username)
+    state.auth.erase_user(p.username)  # last: revokes sessions, drops the row
+
+    return {"deleted": True, "conversations_erased": chats, "documents_erased": docs}

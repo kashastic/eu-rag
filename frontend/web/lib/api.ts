@@ -203,6 +203,15 @@ export const api = {
   async clearApiKey() {
     return request("/account/api-key", { method: "DELETE" });
   },
+  /** Irreversible: account, saved chats, uploaded documents, stored key and
+   *  free-tier counter. The server requires the username back as a typed
+   *  confirmation — Google accounts have no password to re-enter. */
+  async deleteAccount(confirmUsername: string) {
+    return request<{ deleted: true; conversations_erased: number; documents_erased: number }>(
+      "/account",
+      { method: "DELETE", body: JSON.stringify({ confirm_username: confirmUsername }) }
+    );
+  },
   async health() {
     return request<{
       documents: number;

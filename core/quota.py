@@ -130,6 +130,17 @@ class UserQuota:
         )
         return max(0, limit - (row["used"] if row else 0))
 
+    def erase_user(self, username: str) -> None:
+        """Drop the lifetime counter along with the account.
+
+        This does not weaken the free-tier cap. The cap is per *account*, and
+        registering a second account has always started a fresh allowance — so
+        keeping this row after an erasure would retain a username without
+        buying any abuse resistance it doesn't already lack.
+        """
+        with self._db.transaction() as tx:
+            tx.execute("DELETE FROM user_quota WHERE username = ?", (username,))
+
     def consume(self, username: str, limit: int) -> tuple[bool, int]:
         """Atomically take one from the lifetime allowance. Returns
         (allowed, remaining_after); when spent, returns (False, 0) and does not

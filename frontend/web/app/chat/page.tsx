@@ -340,7 +340,12 @@ export default function ChatPage() {
                 Ask
               </button>
             </div>
-            <p className="disclaimer">Information, not legal advice · every claim links to an official source</p>
+            {/* the disclaimer is on every screen anonymous or not, so it is
+                also where the legal pages hang — no separate footer needed */}
+            <p className="disclaimer">
+              Information, <a href="/terms">not legal advice</a> · every claim links to an
+              official source · <a href="/privacy">privacy</a>
+            </p>
           </div>
         </div>
       </main>
@@ -360,6 +365,12 @@ export default function ChatPage() {
           account={account}
           onClose={() => setSettingsOpen(false)}
           onChanged={async () => setAccount(await api.account())}
+          // the account is gone server-side; drop the local session with it so
+          // the UI can't keep showing a signed-in state backed by nothing
+          onDeleted={() => {
+            setSettingsOpen(false);
+            logout();
+          }}
         />
       )}
     </div>
@@ -532,10 +543,12 @@ function SettingsModal({
   account,
   onClose,
   onChanged,
+  onDeleted,
 }: {
   account: Account;
   onClose: () => void;
   onChanged: () => Promise<void>;
+  onDeleted: () => void;
 }) {
   const [key, setKey] = useState("");
   const [error, setError] = useState("");
@@ -635,8 +648,76 @@ function SettingsModal({
             </div>
           </>
         )}
+        <DangerZone account={account} onDeleted={onDeleted} />
         <p className="switch"><button type="button" onClick={onClose}>Close</button></p>
       </div>
+    </div>
+  );
+}
+
+/** Account erasure (GDPR Art. 17), self-service. Two steps on purpose: the
+ *  first click only reveals the confirmation, and the server independently
+ *  requires the username back — a mis-click can't destroy an account, and the
+ *  check doesn't depend on the client behaving. */
+function DangerZone({ account, onDeleted }: { account: Account; onDeleted: () => void }) {
+  const [arming, setArming] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function confirm() {
+    setError("");
+    setBusy(true);
+    try {
+      await api.deleteAccount(typed.trim());
+      onDeleted();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not delete the account");
+      setBusy(false);
+    }
+  }
+
+  if (!arming) {
+    return (
+      <div className="danger-zone">
+        <button type="button" onClick={() => setArming(true)}>Delete account</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="danger-zone">
+      <p>
+        This deletes your account, every saved chat, anything you uploaded, your
+        stored key and your free-question counter. It is immediate and cannot be
+        undone. Questions already answered were sent to Anthropic and are beyond
+        this server&apos;s reach — see{" "}
+        <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy</a>.
+      </p>
+      <div className="field">
+        <label htmlFor="confirm-user">
+          Type <strong>{account.username}</strong> to confirm
+        </label>
+        <input
+          id="confirm-user"
+          value={typed}
+          autoComplete="off"
+          onChange={(e) => setTyped(e.target.value)}
+        />
+      </div>
+      {error && <p className="err">{error}</p>}
+      <button
+        type="button"
+        onClick={confirm}
+        disabled={busy || typed.trim().toLowerCase() !== account.username}
+      >
+        {busy ? "Deleting…" : "Permanently delete"}
+      </button>
+      <p className="switch">
+        <button type="button" onClick={() => { setArming(false); setTyped(""); setError(""); }}>
+          Cancel
+        </button>
+      </p>
     </div>
   );
 }

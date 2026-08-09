@@ -20,6 +20,151 @@ them. Don't paste the same paragraph into three files — link.
 
 ---
 
+## 2026-08-10 (Privacy notice, terms, self-service erasure)
+
+### [DECISION] No cookie banner — because there is nothing to consent to
+
+**The question that started it:** every other site asks for cookie consent, so
+why doesn't EURAG, and shouldn't it, to look production-grade?
+
+**What the code actually does.** Audited before answering: the API sets **no
+cookies at all** (no `Set-Cookie` anywhere), there is no analytics product, no
+advertising, and no third-party tracker. The only thing stored on the visitor's
+device is the session pair `eurag_access` / `eurag_refresh` in `localStorage`
+(`frontend/web/lib/api.ts`).
+
+**Why that means no banner.** The consent rule is ePrivacy Art. 5(3), and it
+covers storing or accessing *any* information on the user's device —
+`localStorage` counts, not just cookies. The carve-out is storage strictly
+necessary for a service the user explicitly requested. Session tokens are the
+textbook example; Turnstile is a security measure (the other established
+exemption); Google Identity Services loads only after the user clicks
+"Continue with Google". Nothing here falls in the consent-requiring bucket,
+which is the bucket every banner you have ever clicked exists to serve.
+
+**So the banner would be worse than nothing.** It would cost conversions on a
+funnel that is only 2 anonymous questions wide, train people to dismiss
+dialogs, and — since it would be managing consent that is not being collected —
+be a false statement on a site whose entire pitch is EU compliance.
+
+**Do not "add the missing cookie banner" in a later session.** If analytics is
+ever added, that is the moment this decision is reopened; cookieless
+self-hosted analytics keeps the exemption, anything else does not.
+
+### [DECISION] The real gap was transparency, not consent — so /privacy and /terms exist now
+
+The audit turned up personal data with no notice attached to it anywhere:
+client IP stored as the anon-quota key (~2 days), username, email and
+`google_sub` for Google accounts, saved chat text, the encrypted BYOK key, the
+audit log, and — most disclosure-worthy — **every question is sent to Anthropic
+in the US**, which nothing on the site said.
+
+`/privacy` and `/terms` (`frontend/web/app/{privacy,terms}/page.tsx`, shared
+constants in `lib/legal.ts`) now state all of it, linked from the composer's
+disclaimer line so anonymous visitors reach them too. The pages are written to
+be **checkable** — every claim maps to something in the code.
+
+**`CONTACT_EMAIL` in `lib/legal.ts` is a placeholder** (`@example.invalid`) and
+must be set to a real, spam-tolerant address before it means anything.
+
+### [DECISION] The web fonts are self-hosted, and must stay that way
+
+`app/layout.tsx` loaded Fraunces / Source Serif 4 / IBM Plex Mono from
+`fonts.googleapis.com`, so **Google received every visitor's IP on every page
+view** — including visitors who never sign in, on a site selling EU compliance,
+and matching the pattern German case law has gone against. Fixed the same day
+the privacy notice went in, because the notice would otherwise have been
+promising a fix rather than describing the product.
+
+`frontend/web/app/fonts.css` (generated, 26 `@font-face` rules) + 26 woff2
+files in `public/fonts/`, ~988 KB on disk. Google's own `unicode-range` rules
+are kept verbatim, so a browser still downloads only the subsets a page needs —
+about 356 KB for a Latin-alphabet visitor, the same bytes Google was serving.
+Two edits to what Google returned: the **vietnamese** subset is dropped (not an
+EU language — those glyphs fall back to a system face), and weights that share
+one file are variable fonts, so they collapse from three rules into one
+`font-weight: 400 700` range instead of storing the same bytes three times.
+
+All three families are SIL OFL 1.1, which permits self-hosting. The refresh
+procedure is in the file's header comment. **Do not revert this to a `<link>`
+for convenience** — `/privacy` states in writing that reading the site tells
+Google nothing.
+
+### [DECISION] `public` and `deleted_account` are reserved usernames
+
+A username here is not a label: `register` sets `tenant = username`, and the
+audit log keys on it. So `RESERVED_USERNAMES` is refused by `register` and
+skipped by `_free_username` (the Google-derived one — nothing stops someone
+owning `public@` at their own Workspace domain, and the derived name would
+otherwise be `public`; it now falls through to `public2`).
+
+- **`public`** — the shared official corpus. That account's uploads would land
+  in the 47 documents everyone reads, and its deletion would try to erase them.
+- **`deleted_account`** — the erasure tombstone. A real account by that name
+  would inherit every erased user's audit rows, and its own rows would be
+  indistinguishable from erased ones.
+
+Anything new that keys on a username string belongs in that set.
+
+### [DECISION] Erasure pseudonymises the audit trail rather than deleting it
+
+`DELETE /account` erases the user row, refresh tokens, saved chats, uploaded
+documents and the lifetime quota row. The audit log instead has its `actor`
+rewritten to `deleted_account` (`ERASED_ACTOR`).
+
+Deleting those rows outright would hand anyone a way to erase the evidence of
+their own attack: register, hammer another account, delete, and the
+`auth.login_failed` trail goes too. Rewriting the actor keeps what the trail is
+*for* while dropping what makes it personal data. A per-user pseudonym was
+rejected — a stable per-person token is still an identifier. This is the one
+exception to the audit log being append-only, and `core/security/auth.py`'s
+module docstring now says so instead of claiming no update path exists.
+
+Dropping the `user_quota` row does **not** weaken the free-tier cap: the cap is
+per account, and registering a second account has always started a fresh
+allowance, so keeping the row would retain a username and buy nothing.
+
+### [GOTCHA] A user's tenant WAS their username with `public` registerable
+
+`AuthStore.register` sets `tenant = username`, and `public` satisfies the
+username rule (3-40 chars, alphanumeric). Self-service deletion therefore had a
+path to `pipeline.erase_tenant("public")` — **erasing all 47 official
+documents**. The admin route had guarded this at the route; the guard is now
+inside `Pipeline.erase_tenant`, where it holds for every caller, and the
+account route skips document erasure for a public-tenant account rather than
+500ing.
+
+**Closed the same day** by `RESERVED_USERNAMES` (see the decision above), which
+stops the account existing in the first place. Both layers stay: the reserved
+list is the fix, the `erase_tenant` guard is the floor that holds even if some
+future code path invents a tenant name another way.
+
+### [GOTCHA] A stateless JWT outlives the account it names
+
+The first version of the erasure test failed on `GET /account` returning **200
+for a deleted user**. `verify_access` only checks the signature, so a 15-minute
+access token kept working after the account was gone: the UI would still look
+signed in, and the ghost session could ask questions against a quota row that
+erasure had just reset.
+
+`api.deps._still_exists` now rejects a token whose account no longer exists, so
+every authenticated request pays one primary-key lookup. That is a real cost
+against the "validated statelessly by any instance" property — accepted,
+because *"deleted immediately"* is a promise now printed on `/privacy`, and the
+ask path already did a lookup of its own (`paid_tier` → `get_byok`). Anonymous
+requests never reach the check.
+
+### [GOTCHA] `httpx` has no `json=` on `.delete()`
+
+`DELETE /account` takes a typed-username confirmation in the body, and
+`TestClient.delete(json=...)` silently isn't a thing — the tests go through
+`client.request("DELETE", …, json=…)`. Browser `fetch` sends a DELETE body
+fine, so this bites only the test suite. The confirmation stayed in the body
+rather than moving to a query string because a username in a URL lands in
+every access log in the chain.
+
+---
+
 ## 2026-08-09 (Google Sign-In)
 
 ### [GOTCHA] Anything in `_SCHEMA` that references a NEW column takes the API down on every existing database

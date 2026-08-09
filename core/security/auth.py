@@ -8,8 +8,10 @@
 - Roles: first registered user is "admin", everyone after "user".
 - Tenancy: each user gets a private tenant; the shared official corpus is
   tenant "public".
-- Audit: append-only by discipline (the store exposes no update/delete for
-  it). Question texts are stored as SHA-256 hashes, never plaintext.
+- Audit: append-only by discipline, with exactly one exception — `erase_user`
+  rewrites the `actor` of a deleted account's rows to ERASED_ACTOR. No audit
+  row is ever deleted. Question texts are stored as SHA-256 hashes, never
+  plaintext.
 
 Running on Postgres (EURAG_DATABASE_URL) makes login, refresh-token
 revocation, and the audit trail consistent across every app instance.
@@ -27,11 +29,28 @@ from pathlib import Path
 import jwt
 
 from core.db import Database
+from core.registry import PUBLIC_TENANT
 
 logger = logging.getLogger(__name__)
 
 ACCESS_TTL = 15 * 60  # seconds
 REFRESH_TTL = 7 * 24 * 3600
+
+# What a deleted account's audit rows are attributed to. Deliberately a single
+# shared value and not a per-user pseudonym: a per-user token would still be a
+# stable identifier for the person who was erased.
+ERASED_ACTOR = "deleted_account"
+
+# Usernames the system already uses as identifiers elsewhere. A username is not
+# just a label here — `register` sets `tenant = username`, and the audit log
+# keys on it — so these are collisions, not cosmetics:
+#   "public"          → the shared official corpus. That account's uploads would
+#                       land in the 47-document corpus everyone reads, and its
+#                       deletion would try to erase it.
+#   "deleted_account" → the erasure tombstone. A real account by that name would
+#                       inherit every erased user's audit rows, and its own rows
+#                       would be indistinguishable from erased ones.
+RESERVED_USERNAMES = frozenset({PUBLIC_TENANT, ERASED_ACTOR})
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -143,6 +162,8 @@ class AuthStore:
         username = username.strip().lower()
         if not (3 <= len(username) <= 40) or not username.replace("_", "").isalnum():
             raise AuthError("username: 3-40 chars, letters/digits/underscore")
+        if username in RESERVED_USERNAMES:
+            raise AuthError("that username is reserved")
         if len(password) < 10:
             raise AuthError("password must be at least 10 characters")
         if self._db.query_one("SELECT 1 AS x FROM users WHERE username = ?", (username,)):
@@ -239,8 +260,14 @@ class AuthStore:
 
     def _free_username(self, email: str, name: str | None) -> str:
         """A username derived from the Google profile that satisfies the same
-        rule as registration (3-40 chars, letters/digits/underscore) and is not
-        already taken."""
+        rules as registration (3-40 chars, letters/digits/underscore, not
+        reserved) and is not already taken.
+
+        The reserved check matters here as much as in `register`: nothing stops
+        someone owning `public@…` at a Google Workspace domain, and the derived
+        name would otherwise be `public` — the shared corpus tenant. A reserved
+        base falls through to the numbered suffixes (`public2`), exactly like a
+        taken one."""
         raw = (email.split("@")[0] if email else "") or (name or "") or "user"
         # ASCII only: str.isalnum() is true for "ë" and every other unicode
         # letter, and a username derived from a display name ends up in a tenant
@@ -255,11 +282,48 @@ class AuthStore:
             base += "0"
         for suffix in ("", *(str(n) for n in range(2, 10000))):
             candidate = base + suffix
+            if candidate in RESERVED_USERNAMES:
+                continue
             if not self._db.query_one(
                 "SELECT 1 AS x FROM users WHERE username = ?", (candidate,)
             ):
                 return candidate
         raise AuthError("could not derive a free username")  # pragma: no cover
+
+    def user_exists(self, username: str) -> bool:
+        """Does this account still exist? Checked per authenticated request so
+        that erasing an account ends its sessions at once — see
+        `api.deps.current_principal` for why that costs a lookup."""
+        return (
+            self._db.query_one("SELECT 1 AS x FROM users WHERE username = ?", (username,))
+            is not None
+        )
+
+    def erase_user(self, username: str) -> None:
+        """Delete the account itself — the user row and every refresh token, so
+        live sessions die with it.
+
+        **This is the last step of an erasure, not the whole of it.** The
+        caller owns the user's *content* (saved chats, uploaded documents, the
+        lifetime quota row) and must clear that first; see the DELETE /account
+        route. Ordering it this way means a failure part-way through leaves an
+        account that still works, rather than a login whose data is gone.
+
+        The audit trail is **pseudonymised, not deleted**. Rewriting `actor` to
+        ERASED_ACTOR keeps what the trail is for (a record that a registration
+        or a run of failed logins happened) while dropping what makes it
+        personal data (who). Deleting the rows outright would also hand anyone
+        a way to erase the evidence of their own failed logins: register,
+        attack, delete the account, and the trail goes with it.
+        """
+        with self._db.transaction() as tx:
+            tx.execute("DELETE FROM refresh_tokens WHERE username = ?", (username,))
+            tx.execute("DELETE FROM users WHERE username = ?", (username,))
+            tx.execute(
+                "UPDATE audit SET actor = ? WHERE actor = ?", (ERASED_ACTOR, username)
+            )
+        # after the rewrite, so this row is not itself caught by it
+        self.audit(ERASED_ACTOR, "account.erase")
 
     # --- tokens --------------------------------------------------------------
 
