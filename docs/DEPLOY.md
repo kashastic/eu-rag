@@ -147,14 +147,39 @@ Measured on the running prod stack (2026-08-08), `docker stats`:
 An API replica **more than doubles** while answering — the reranker and embedding
 work are transient. Size for peak, not idle.
 
+### The escalation path is the real maximum
+
+The table above measures a *normal* query. It is not the ceiling. When an answer
+escalates, retrieval widens to `EURAG_ESCALATION_TOP_K` (12), and
+`hybrid_retriever` builds a candidate pool of `max(k*5, 30)` — so the
+cross-encoder sees **60 candidates instead of 30**. Peak RSS of that rerank step
+alone, measured per batch size on 60 real chunks (2026-08-09):
+
+| `EURAG_RERANK_BATCH` | peak RSS | rerank allocation | time |
+|---|---|---|---|
+| 64 (fastembed's default) | 1948 MB | **1607 MB** | 2.27s |
+| 16 | 949 MB | 605 MB | 2.58s |
+| **8 (our default)** | **627 MB** | **284 MB** | 2.71s |
+
+Before this was bounded, a single escalated query allocated ~1.6 GB on top of the
+835 MB baseline and **OOM-killed the api container on a 4 GB host** — the
+symptom is a `502` with no traceback in the api log, and a `killed process` line
+in `dmesg` (see DEVLOG 2026-08-09). Batching costs +0.44s and no accuracy:
+scores are per-pair independent, and every harness metric is identical from
+batch 4 to 64.
+
+**If you raise `EURAG_ESCALATION_TOP_K`, the pool and this peak grow with it.**
+
 **Consequence: every 1 GB "always free"/12-month VM is unusable** — AWS
 `t3.micro`, Azure `B1S`, GCP `e2-micro` all OOM on the first question. The floor
-is **4 GB** for a comfortable single-replica deployment.
+is **4 GB** for a comfortable single-replica deployment, and 4 GB is only
+comfortable *with* `EURAG_RERANK_BATCH` bounded.
 
-Cheapest lever if memory is tight: set `replicas: 1` in the prod compose
-(−835 MB). Do *not* reach for `EURAG_RERANKER=none` — it is worth ~6pp of
-phrase-hit accuracy, and it is a retrieval change, so it needs before/after
-harness numbers per the standing rule.
+Cheapest levers if memory is tight, in order: `replicas: 1` in the prod compose
+(−835 MB), then a lower `EURAG_RERANK_BATCH` (free — no accuracy cost). Do *not*
+reach for `EURAG_RERANKER=none` — it is worth ~6pp of phrase-hit accuracy, and it
+is a retrieval change, so it needs before/after harness numbers per the standing
+rule.
 
 ## 5. Free-tier runbook (GCP trial credit + a free subdomain)
 

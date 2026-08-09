@@ -64,6 +64,24 @@ def delete(conv_id: str, request: Request, p: Principal = Depends(current_princi
     return {"deleted": conv_id}
 
 
+def _history(conv: dict) -> list[tuple[str, str]]:
+    """Prior (question, answer) turns from the stored conversation, oldest
+    first, so a follow-up can be rewritten to stand on its own before
+    retrieval. Unlike /query — which is stateless and must take the client's
+    word for it — this route already holds the persisted chat, so the history
+    is server-owned and needs no caps or trust. Messages alternate user then
+    assistant; a user turn whose answer failed simply carries an empty one."""
+    turns: list[tuple[str, str]] = []
+    messages = conv.get("messages") or []
+    for i, msg in enumerate(messages):
+        if msg.get("role") != "user":
+            continue
+        nxt = messages[i + 1] if i + 1 < len(messages) else None
+        answer = nxt.get("content", "") if nxt and nxt.get("role") == "assistant" else ""
+        turns.append((msg.get("content", ""), answer))
+    return turns
+
+
 @router.post("/conversations/{conv_id}/messages")
 def ask(conv_id: str, body: Ask, request: Request, p: Principal = Depends(current_principal)):
     """Ask a question within a saved chat: run the pipeline, persist both the
@@ -82,6 +100,7 @@ def ask(conv_id: str, body: Ask, request: Request, p: Principal = Depends(curren
         answer_model=plan["answer_model"],
         escalation_model=plan["escalation_model"],
         api_key=plan["api_key"],
+        history=_history(conv),
     ).to_dict()
     result["tier"] = plan["tier"]
 

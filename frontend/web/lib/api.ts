@@ -41,6 +41,13 @@ export type ChatMessage = {
   created_at: number;
 };
 
+/** One prior exchange, sent so a follow-up can be resolved before retrieval. */
+export type HistoryTurn = { question: string; answer: string };
+
+/** Turns sent with a follow-up. The server trims further; this just keeps the
+ *  request small. */
+export const HISTORY_TURNS = 3;
+
 export type ChatSummary = { id: string; title: string; updated_at: number };
 export type Chat = ChatSummary & { messages: ChatMessage[] };
 
@@ -121,14 +128,23 @@ export const api = {
   async me() {
     return request<{ username: string; role: string; auth_enabled: boolean }>("/auth/me");
   },
-  // anonymous, stateless query — no token, no saved history
-  async queryAnon(question: string, industry?: string, turnstileToken?: string) {
+  // Anonymous query. The backend keeps no session, so prior turns are sent
+  // with the request: a follow-up ("what if I have 29 people?") carries no
+  // topic of its own and would otherwise be retrieved as a fragment. The
+  // server caps and trims what it uses; sending the last few turns is enough.
+  async queryAnon(
+    question: string,
+    industry?: string,
+    turnstileToken?: string,
+    history?: HistoryTurn[]
+  ) {
     return request<Answer>("/query", {
       method: "POST",
       body: JSON.stringify({
         question,
         ...(industry ? { industry } : {}),
         ...(turnstileToken ? { turnstile_token: turnstileToken } : {}),
+        ...(history?.length ? { history: history.slice(-HISTORY_TURNS) } : {}),
       }),
     });
   },

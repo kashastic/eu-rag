@@ -10,6 +10,7 @@ import {
   type Chat,
   type ChatMessage,
   type ChatSummary,
+  type HistoryTurn,
 } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
 import { Turnstile, type TurnstileHandle } from "@/components/Turnstile";
@@ -130,7 +131,14 @@ export default function ChatPage() {
       setAnonMsgs((m) => [...m, userMsg]);
       setPending(true);
       try {
-        const ans = await api.queryAnon(q, industry || undefined, tsToken ?? undefined);
+        // anonMsgs here is still the pre-question state, which is exactly the
+        // history to resolve this follow-up against
+        const ans = await api.queryAnon(
+          q,
+          industry || undefined,
+          tsToken ?? undefined,
+          toHistory(anonMsgs)
+        );
         setAnonMsgs((m) => [...m, answerToMsg(ans)]);
         if (typeof ans.anon_remaining === "number") setAnonRemaining(ans.anon_remaining);
       } catch (err) {
@@ -314,6 +322,24 @@ export default function ChatPage() {
       )}
     </div>
   );
+}
+
+/** Pairs the rendered transcript back into (question, answer) turns for the
+ *  backend. Only the anonymous path needs this — logged-in chats are stored
+ *  server-side, so that route reads its own history. A question whose answer
+ *  errored keeps an empty answer: the topic still helps resolve the next
+ *  follow-up. */
+function toHistory(msgs: ChatMessage[]): HistoryTurn[] {
+  const turns: HistoryTurn[] = [];
+  msgs.forEach((msg, i) => {
+    if (msg.role !== "user") return;
+    const next = msgs[i + 1];
+    turns.push({
+      question: msg.content,
+      answer: next && next.role === "assistant" ? next.content : "",
+    });
+  });
+  return turns;
 }
 
 function answerToMsg(ans: Awaited<ReturnType<typeof api.queryAnon>>): ChatMessage {

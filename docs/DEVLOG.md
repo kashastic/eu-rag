@@ -2,6 +2,157 @@
 
 Running log of build sessions. Newest first.
 
+## 2026-08-09 — live on a public URL, the first production OOM, and follow-ups
+
+Three things in one day: the deploy, an OOM the deploy exposed, and a retrieval
+bug the browser pass exposed.
+
+### Follow-up questions retrieved the wrong act
+
+The browser pass (the last unverified item from the live-safety batch — the
+Turnstile widget had never actually been rendered and clicked) worked, and
+immediately surfaced a real bug. After a good GDPR answer about data protection
+officers, the follow-up **"what if I have 29 people?"** was answered against the
+**Pay Transparency Directive**, and the model itself said the question was *"too
+vague on its own"*.
+
+Root cause: `pipeline.query()` took no history at all. Conversations were stored
+in `core/conversations.py` for display only — prior turns never reached
+retrieval or generation. Stripped of its conversation, the follow-up's only
+lexical signal is a headcount, which matches Pay Transparency's "fewer than 100
+workers"; BM25 and the vector leg agreed on the wrong act and the reranker
+faithfully ranked its passages. HyDE made it *worse*, expanding the fragment in
+the wrong direction.
+
+Fix: **`QueryContextualizer`** (`core/retrieval/expansion.py`) rewrites a
+follow-up into a standalone question before retrieval, from prior turns, via
+Haiku. One rewrite fixes both halves — retrieval gets a real topic, and because
+the rewritten question is what the answerer receives, it never sees a fragment,
+so `answerer`'s cite-or-fail discipline is untouched. It runs **before** HyDE;
+the opposite order expands a fragment. Bad rewrites degrade to the raw query:
+empty, multi-line, or over-long replies are rejected, because a wrong rewrite
+silently retrieves the wrong act and is worse than no rewrite.
+
+**Where history comes from differs by tier, deliberately.** Anonymous users have
+no saved conversation, and anonymous is the default demo path — so the client
+sends its turns, capped like `/ingest` fields (≤10 turns, ≤2000 chars each,
+last 3 used, answers truncated to 400 chars) because that is untrusted text
+entering a prompt. `/conversations/{id}/messages` already loads the stored chat
+before querying, so it reads history server-side and trusts nothing from the
+client.
+
+**Harness (standing rule 1).** Three follow-up cases added to the golden set,
+including the exact live sequence. They are not self-contained by design, and
+their failure is not random — each one's only standalone signal points at a
+different act.
+
+| | before | after |
+|---|---|---|
+| doc_hit | 94% | **100%** |
+| doc_mrr | 0.94 | **1.00** |
+| phrase_hit | 87% | **94%** |
+| compound_hit | 100% | 100% |
+| follow-up cases | **2 of 3 MISS** | **3 of 3 rank 1, phrase ✓** |
+
+Single-turn cases are unmoved — 30/32 phrase hits still leaves the known Late
+Payment miss exactly where it was. The third follow-up ("what about the
+withdrawal period?") passed *before* the fix too: "withdrawal period" is
+lexically distinctive enough to stand alone. It was kept precisely because it
+shows not every follow-up is broken, so the metric can't be gamed by assuming
+they all are.
+
+Cost: one Haiku call, and only on questions that actually carry history. First
+questions are untouched, and local single-user mode never sends history, so it
+is inert there.
+
+Follow-up cases **skip** in `tests/evaluation/test_golden_retrieval.py` — that
+suite is offline by design and there is no LLM to rewrite with, so asserting
+them would test nothing. Same treatment as a `core=False` case whose document
+isn't in the corpus: skip honestly rather than fail or silently pass.
+
+Tests 212 → **220 passed, 6 skipped**.
+
+### Live deploy
+
+EURAG went live at `https://eurag.duckdns.org` on a GCP `e2-medium` (2 vCPU /
+4 GB, europe-west3) on trial credit. `/healthz` reported the whole contract
+holding on the first boot: `documents=47`, `embedder=fastembed:…MiniLM-L12-v2`
+(strict boot held — no silent hash fallback), `auth_enabled=true`,
+`encryption=true`, and the real Turnstile sitekey served. Caddy took a
+Let's Encrypt cert on the first attempt, which finally exercised the Phase 7
+`EURAG_DOMAIN` fix in anger. The first-ever CI run went green on all three
+jobs, including the two that had never executed anywhere: pytest on py3.11
+(local dev is 3.13) and the postgres-parity job.
+
+**A third prod-only bug surfaced at bring-up.** `data/raw/` is gitignored, so
+it does not exist in a fresh clone, and Docker created the bind-mount source
+as `root:root`. The image runs as `USER eurag` (uid 10001), which cannot write
+`data/raw/.seed.lock` — the seeder died in 5s with `PermissionError`, and
+`service_completed_successfully` correctly refused to start the API behind it.
+Unblocked with `chown -R 10001:10001 data/raw`. **This was invisible in the
+Phase 7 local rehearsal**: Docker Desktop on macOS remaps bind-mount ownership,
+so the failure mode only exists on Linux. Worth remembering that the macOS
+rehearsal validates behaviour, not permissions.
+
+**Then the escalation path OOM-killed the API.** A follow-up question escalated
+(`low-confidence answer — escalating to claude-opus-4-8 over wider retrieval`),
+the container died mid-request with no traceback, and the next two questions
+returned `HTTP 502` until `restart: unless-stopped` brought it back.
+`dmesg` showed one `killed process`, and the api container showed exactly one
+restart and two cold starts.
+
+Root cause: `hybrid_retriever` builds `pool = max(k*5, 30)` when reranking —
+**30 candidates at `top_k=6`, but 60 on the escalation path at
+`EURAG_ESCALATION_TOP_K=12`** — and `CrossEncoderReranker.rank` called
+fastembed's `rerank()` without `batch_size`, taking its default of **64**.
+That default sits above every pool this retriever can build, so the whole pool
+always went through in a *single* forward pass, and the escalation path
+allocated double the activations of a normal query.
+
+Measured (peak RSS per process, one process per batch size, 60 real corpus
+chunks — the escalation pool):
+
+| batch | peak RSS | rerank allocation | time |
+|---|---|---|---|
+| **64 (old default)** | 1948 MB | **1607 MB** | 2.27s |
+| 32 | 1424 MB | 1080 MB | 1.85s |
+| 16 | 949 MB | 605 MB | 2.58s |
+| **8 (new default)** | **627 MB** | **284 MB** | 2.71s |
+
+A single rerank step was allocating **1.6 GB**, on top of an 835 MB resident
+baseline, on a 3.8 GiB host. Fix: `EURAG_RERANK_BATCH` (default **8**),
+threaded `config → pipeline → get_reranker → CrossEncoderReranker`. That is a
+**5.7× cut in transient allocation for +0.44s** — noise beside a multi-second
+Claude call — and it keeps the box at 4 GB instead of forcing a resize.
+
+**Harness (standing rule 1): no movement.** Cross-encoder scores are per-pair
+independent, so batching bounds memory without touching ranking. With
+expansion disabled for determinism, every batch size from 4 to 64 is identical:
+
+```
+EURAG_HYDE_MODEL=none, batch ∈ {4, 8, 16, 32, 64}
+k=6  cases=29  doc_hit=100%  doc_mrr=1.00  phrase_hit=93%  compound_hit=67%
+```
+
+**Methodological finding worth keeping: the harness is not deterministic with
+HyDE on.** The first A/B appeared to show `compound_hit` 100%→67% at batch=8 —
+but a repeat run of the *same* config gave 100%, and batch=12 then gave 67%.
+Expansion calls Haiku, so each run gets a different hypothetical document,
+a different candidate pool, and one knife-edge compound case flips with it.
+**A single-case metric delta is not attributable to a code change unless
+`EURAG_HYDE_MODEL=none` pins the expansion.** The golden set has only 3
+compound cases, so one flip is 33 points — that metric is low-resolution by
+construction. (Incidentally this also re-confirms HyDE's value: compound_hit is
+consistently 67% with expansion off and reaches 100% with it on.)
+
+Also corrected: `docs/DEPLOY.md` §4 measured idle and peak-while-answering but
+never measured the **escalation** path, so it published a sizing floor derived
+from the common case and missed the true maximum by ~1.5 GB.
+
+Tests 209 → **212** (batch size is forwarded, `get_reranker` forwards it, and
+ordering is batch-invariant) — a silent regression here would cost 5.7× peak
+memory with no other symptom.
+
 ## 2026-07-25 → 08-08 — "make it live safely": blockers, hardening, CI, prod bring-up
 
 v1.0.0 was feature-complete but not safely deployable. A sanity pass found: a

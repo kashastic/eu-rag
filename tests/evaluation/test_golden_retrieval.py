@@ -9,6 +9,10 @@ Core cases run against whatever corpus is seeded — samples on a fresh clone,
 real EUR-Lex full texts once `python -m data.scrapers.eurlex` has been run.
 Extended cases (core=False) cover laws that only exist in the pulled corpus;
 they skip rather than fail when their document is absent.
+
+Follow-up cases (history=...) are deliberately not self-contained and can only
+be retrieved after an LLM rewrites them, so they skip here — this suite is
+offline by design — and are measured by the harness with a key present.
 """
 
 import pytest
@@ -24,8 +28,21 @@ def _ids(cases):
     return [c.question[:50] for c in cases]
 
 
+def _skip_if_unresolvable(pipeline, case):
+    """A follow-up without a contextualizer is not a failing case, it is an
+    unevaluatable one: the question is a fragment on purpose. Skipping keeps
+    the offline bar honest instead of asserting something this suite cannot
+    exercise."""
+    if case.history and pipeline.contextualizer is None:
+        pytest.skip(
+            "follow-up needs contextualisation (an LLM call); this suite runs"
+            " offline — measured by python -m core.evaluation.harness"
+        )
+
+
 @pytest.mark.parametrize("case", CORE, ids=_ids(CORE))
 def test_expected_document_is_retrieved(seeded_pipeline, case):
+    _skip_if_unresolvable(seeded_pipeline, case)
     result = evaluate_case(seeded_pipeline, case, k=6)
     assert result.retrieved_titles, "retrieval returned nothing"
     assert result.doc_hit, (
@@ -36,6 +53,7 @@ def test_expected_document_is_retrieved(seeded_pipeline, case):
 
 @pytest.mark.parametrize("case", EXTENDED, ids=_ids(EXTENDED))
 def test_extended_corpus_document_is_retrieved(seeded_pipeline, case):
+    _skip_if_unresolvable(seeded_pipeline, case)
     titles = [d["title"].lower() for d in seeded_pipeline.registry.list_documents()]
     needed = set(case.requires_all) | {case.doc_marker}
     if not all(marker_present(m, titles) for m in needed):

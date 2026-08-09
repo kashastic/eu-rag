@@ -1,7 +1,11 @@
-"""HyDE + decomposition: parsing, fallbacks, and retriever integration."""
+"""Contextualisation + HyDE + decomposition: parsing, fallbacks, integration."""
 
 from core.retrieval.bm25 import BM25Index
-from core.retrieval.expansion import HydeExpander, QueryDecomposer
+from core.retrieval.expansion import (
+    HydeExpander,
+    QueryContextualizer,
+    QueryDecomposer,
+)
 from core.retrieval.hybrid_retriever import HybridRetriever
 
 
@@ -10,8 +14,10 @@ class FakeLLM:
 
     def __init__(self, reply=None, error=False):
         self.reply, self.error = reply, error
+        self.prompts: list[str] = []
 
     def complete(self, system, user):
+        self.prompts.append(user)
         if self.error:
             raise RuntimeError("api down")
         return self.reply
@@ -29,6 +35,61 @@ class RecordingEmbedder:
 class _NoVectors:
     def search(self, vector, k, tenants=None):
         return []
+
+
+_DPO_TURN = (
+    "Do I need a data protection officer for a 30-person company?",
+    "It does not depend on headcount; Article 37(1) GDPR turns on your core"
+    " activities.",
+)
+
+
+def test_contextualizer_rewrites_follow_up_into_standalone_question():
+    llm = FakeLLM("Do I need a data protection officer with 29 employees?")
+    out = QueryContextualizer(llm).standalone("what if I have 29 people?", [_DPO_TURN])
+    assert out == "Do I need a data protection officer with 29 employees?"
+    # the prior turn must actually reach the prompt — that is the whole point
+    assert "data protection officer" in llm.prompts[0]
+    assert "what if I have 29 people?" in llm.prompts[0]
+
+
+def test_contextualizer_no_history_is_a_no_op_and_costs_no_call():
+    """First questions must not pay a Haiku call or risk a bad rewrite."""
+    llm = FakeLLM("SHOULD NOT BE USED")
+    assert QueryContextualizer(llm).standalone("Do I need a DPO?", []) == (
+        "Do I need a DPO?"
+    )
+    assert llm.prompts == []
+
+
+def test_contextualizer_falls_back_to_raw_query_on_error():
+    out = QueryContextualizer(FakeLLM(error=True)).standalone("q", [_DPO_TURN])
+    assert out == "q"
+
+
+def test_contextualizer_rejects_unusable_rewrites():
+    """A rewrite is only worth using if it is a single plain question. A model
+    that explains itself, answers instead, or returns nothing must degrade to
+    the raw query — a bad rewrite is worse than none, because it silently
+    retrieves the wrong act."""
+    for bad in ["", "   ", "Sure! Here is the question:\nDo I need a DPO?", "x" * 401]:
+        out = QueryContextualizer(FakeLLM(bad)).standalone("follow up?", [_DPO_TURN])
+        assert out == "follow up?", f"should have rejected {bad[:30]!r}"
+
+
+def test_contextualizer_bounds_what_reaches_the_prompt():
+    """History is client-supplied text going into a prompt: only the last few
+    turns are used and answers are truncated."""
+    llm = FakeLLM("rewritten")
+    history = [(f"question {i}", "A" * 2000) for i in range(6)]
+    QueryContextualizer(llm).standalone("follow up?", history)
+
+    prompt = llm.prompts[0]
+    assert "question 5" in prompt and "question 0" not in prompt
+    assert prompt.count("A" * QueryContextualizer.MAX_ANSWER_CHARS) <= (
+        QueryContextualizer.MAX_TURNS
+    )
+    assert "A" * (QueryContextualizer.MAX_ANSWER_CHARS + 1) not in prompt
 
 
 def test_hyde_appends_passage_to_query():

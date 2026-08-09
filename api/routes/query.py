@@ -18,10 +18,32 @@ from core.security.auth import Principal, question_hash
 router = APIRouter(tags=["query"])
 
 
+class HistoryTurn(BaseModel):
+    """One prior exchange. Caps are deliberate: this is client-supplied text
+    that ends up inside a prompt, so it is bounded the same way /ingest is.
+    Answers are trimmed hard because only their topic matters to the rewrite."""
+
+    question: str = Field(max_length=2000)
+    answer: str = Field(default="", max_length=2000)
+
+
 class QueryRequest(BaseModel):
     question: str = Field(min_length=3, max_length=2000)
     industry: str | None = Field(default=None, max_length=80)
     turnstile_token: str | None = Field(default=None, max_length=2048)
+    # Prior turns, oldest first, so a follow-up can be rewritten to stand on
+    # its own before retrieval. Sent by the client rather than loaded
+    # server-side because anonymous users have no saved conversation — and
+    # anonymous is the default demo path. max_length bounds the request; the
+    # contextualizer additionally uses only the last few turns.
+    history: list[HistoryTurn] = Field(default_factory=list, max_length=10)
+
+
+def _history(body: QueryRequest) -> list[tuple[str, str]]:
+    """Wire form -> pipeline form. Turns without a question carry no context
+    to resolve against, so they are dropped rather than padded into the
+    prompt."""
+    return [(t.question, t.answer) for t in body.history if t.question.strip()]
 
 
 @router.post("/query")
@@ -66,6 +88,7 @@ def query(
                 tenants=["public"],
                 answer_model=settings.llm_model,
                 escalation_model=settings.escalation_model,
+                history=_history(body),
             ).to_dict()
         except LLMUnavailableError:
             # the question was consumed up front (parallel-overrun safety) but
@@ -85,6 +108,7 @@ def query(
         answer_model=plan["answer_model"],
         escalation_model=plan["escalation_model"],
         api_key=plan["api_key"],
+        history=_history(body),
     ).to_dict()
     result["tier"] = plan["tier"]
     if app.state.auth_enabled:

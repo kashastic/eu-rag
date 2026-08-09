@@ -102,3 +102,88 @@ def test_query_accepts_optional_industry(settings):
         assert client.post(
             "/query", json={"question": "abc", "industry": "x" * 81}
         ).status_code == 422
+
+
+def test_query_accepts_history_and_passes_it_to_the_pipeline(settings, monkeypatch):
+    """A follow-up carries no topic of its own, so the prior turns must reach
+    the pipeline or retrieval runs on a fragment (observed in prod: "what if I
+    have 29 people?" retrieved the Pay Transparency Directive). Local mode uses
+    the extractive client and builds no contextualizer, so this asserts the
+    plumbing rather than the rewrite — the rewrite itself is covered by the
+    golden harness and tests/unit/test_expansion.py."""
+    from api.main import app
+
+    with TestClient(app) as client:
+        seed(app.state.pipeline)
+        seen: dict = {}
+        original = app.state.pipeline.query
+
+        def spy(question, *args, **kwargs):
+            seen["history"] = kwargs.get("history")
+            return original(question, *args, **kwargs)
+
+        monkeypatch.setattr(app.state.pipeline, "query", spy)
+
+        res = client.post(
+            "/query",
+            json={
+                "question": "what if I have 29 people?",
+                "history": [
+                    {
+                        "question": "Do I need a data protection officer?",
+                        "answer": "It depends on your core activities.",
+                    }
+                ],
+            },
+        )
+
+        assert res.status_code == 200
+        assert seen["history"] == [
+            ("Do I need a data protection officer?", "It depends on your core activities.")
+        ]
+
+
+def test_query_without_history_is_unchanged(settings, monkeypatch):
+    """Every existing caller omits history; they must keep working and must
+    hand the pipeline an empty list, never None-shaped surprises."""
+    from api.main import app
+
+    with TestClient(app) as client:
+        seed(app.state.pipeline)
+        seen: dict = {}
+        original = app.state.pipeline.query
+
+        def spy(question, *args, **kwargs):
+            seen["history"] = kwargs.get("history")
+            return original(question, *args, **kwargs)
+
+        monkeypatch.setattr(app.state.pipeline, "query", spy)
+        res = client.post("/query", json={"question": "What is an SME?"})
+
+        assert res.status_code == 200
+        assert seen["history"] == []
+
+
+def test_query_rejects_oversize_history(settings):
+    """History is client-supplied text that lands in a prompt, so it is capped
+    the same way /ingest fields are."""
+    from api.main import app
+
+    with TestClient(app) as client:
+        res = client.post(
+            "/query",
+            json={
+                "question": "follow up?",
+                "history": [{"question": "q", "answer": "x"}] * 11,
+            },
+        )
+        assert res.status_code == 422
+
+        res = client.post(
+            "/query",
+            json={
+                "question": "follow up?",
+                "history": [{"question": "q", "answer": "x" * 2001}],
+            },
+        )
+        assert res.status_code == 422

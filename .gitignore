@@ -15,4 +15,5 @@ data/raw/
 .claude/settings.local.json
 frontend/web/node_modules/
 frontend/web/.next/
+frontend/web/tsconfig.tsbuildinfo
 frontend/web/.env.local

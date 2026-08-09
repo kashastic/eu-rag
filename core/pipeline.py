@@ -57,8 +57,13 @@ class Pipeline:
             if not isinstance(candidate, ExtractiveClient):
                 self.escalation_llm = candidate
         expander = decomposer = None
+        self.contextualizer = None
         if not isinstance(self.llm, ExtractiveClient):
-            from core.retrieval.expansion import HydeExpander, QueryDecomposer
+            from core.retrieval.expansion import (
+                HydeExpander,
+                QueryContextualizer,
+                QueryDecomposer,
+            )
 
             if self.settings.hyde_model not in ("", "none"):
                 expander = HydeExpander(get_llm_client(self.settings.hyde_model))
@@ -66,11 +71,17 @@ class Pipeline:
                 decomposer = QueryDecomposer(
                     get_llm_client(self.settings.decompose_model)
                 )
+            if self.settings.contextualize_model not in ("", "none"):
+                self.contextualizer = QueryContextualizer(
+                    get_llm_client(self.settings.contextualize_model)
+                )
         self.retriever = HybridRetriever(
             self.bm25,
             self.vectors,
             self.embedder,
-            reranker=get_reranker(self.settings.reranker),
+            reranker=get_reranker(
+                self.settings.reranker, self.settings.rerank_batch
+            ),
             get_chunks=self.registry.get_chunks,
             expander=expander,
             decomposer=decomposer,
@@ -145,14 +156,25 @@ class Pipeline:
         answer_model: str | None = None,
         escalation_model: str | None = None,
         api_key: str | None = None,
+        history: list[tuple[str, str]] | None = None,
     ) -> AnswerResult:
         """`tenants` scopes retrieval. The three model params implement the
         tiering: anonymous/BYOK get the full Sonnet→Opus cascade; the logged-in
         free tier passes answer_model=Haiku and escalation_model="none".
-        None on all three preserves the local/default behaviour."""
+        None on all three preserves the local/default behaviour.
+
+        `history` is prior (question, answer) turns, oldest first. When
+        present, the question is first rewritten to stand on its own — a bare
+        follow-up has no topic of its own to retrieve on. The rewritten form
+        is what retrieval AND the answerer see, so the answerer is never handed
+        a fragment. Empty/None history is a no-op, which is why local mode and
+        every single-turn caller behave exactly as before."""
         if industry:
             # research signal for corpus expansion: which sectors ask questions
             logger.info("query industry context: %s", industry)
+
+        if history and self.contextualizer is not None:
+            question = self.contextualizer.standalone(question, history)
 
         if answer_model or api_key:
             llm = self._resolve_llm(answer_model, api_key)

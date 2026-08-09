@@ -40,7 +40,14 @@ class CaseResult:
 
 
 def evaluate_case(pipeline: Pipeline, case: GoldenCase, k: int) -> CaseResult:
-    chunk_ids = pipeline.retriever.retrieve(case.question, k=k)
+    # Follow-up cases are not self-contained by design, so they get the same
+    # pre-retrieval rewrite pipeline.query() applies. Without it they retrieve
+    # on whatever stray signal the fragment carries, which is the bug these
+    # cases exist to catch. Single-turn cases are untouched.
+    question = case.question
+    if case.history and pipeline.contextualizer is not None:
+        question = pipeline.contextualizer.standalone(question, list(case.history))
+    chunk_ids = pipeline.retriever.retrieve(question, k=k)
     chunks = pipeline.registry.get_chunks(chunk_ids)
     # "A|B" = alternatives: any of these documents legitimately answers
     markers = [m.strip().lower() for m in case.doc_marker.split("|")]

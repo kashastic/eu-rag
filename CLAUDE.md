@@ -11,15 +11,19 @@ so instead of guessing. FastAPI backend + a Next.js web app. Corpus is 47
 documents (31 EUR-Lex acts + EC portal pages + open-calls snapshot + 10
 national funding agencies).
 
-**Milestones M1–M6 are all complete** and tagged `v1.0.0`. The **"make it live
-safely" batch is complete** (all 8 phases, commit `ae5260d` — **committed but not
-yet pushed**; the live deploy is blocked on the user creating a GCP VM) — resume from
-[`context_files/HANDOFF.md`](context_files/HANDOFF.md); the approved plan with
-all design decisions is [`context_files/PLAN_LIVE_SAFETY.md`](context_files/PLAN_LIVE_SAFETY.md).
+**Milestones M1–M6 are complete** and tagged `v1.0.0`, the **"make it live
+safely" batch is complete** (all 8 phases), and **EURAG is LIVE** at
+<https://eurag.duckdns.org> — GCP `e2-medium`, 47 documents, real Turnstile
+keys, Let's Encrypt cert. Current state and open work:
+[`context_files/HANDOFF.md`](context_files/HANDOFF.md); the batch's design
+decisions (D1–D17) are in
+[`context_files/PLAN_LIVE_SAFETY.md`](context_files/PLAN_LIVE_SAFETY.md).
 The repo docs are the single source of truth (there is no external tracker —
 do **not** look for Notion or similar). Start deep dives from
 [`docs/WIKI.md`](docs/WIKI.md); the running build log with before/after
-numbers is [`docs/DEVLOG.md`](docs/DEVLOG.md).
+numbers is [`docs/DEVLOG.md`](docs/DEVLOG.md); dated decisions and gotchas —
+**what was chosen and why, so it isn't silently reversed** — are in
+[`docs/UPDATE_LOG.md`](docs/UPDATE_LOG.md).
 
 ## Commands
 
@@ -27,7 +31,7 @@ numbers is [`docs/DEVLOG.md`](docs/DEVLOG.md).
 # env (Python 3.11+; venv already exists at .venv)
 source .venv/bin/activate
 
-# tests — 209 pass, fully offline (hash embedder, no API key needed)
+# tests — 220 pass / 6 skip, fully offline (hash embedder, no API key needed)
 .venv/bin/python -m pytest -q
 EURAG_LIVE_TESTS=1 pytest tests/test_hardening.py -q        # opt-in live LLM test
 EURAG_TEST_DATABASE_URL=postgresql://… pytest tests/test_postgres.py   # opt-in PG parity
@@ -40,7 +44,7 @@ python -m data.seed                   # ingest everything cached into the store
 python -m data.seed --scrape --expect-docs 47   # deploy mode: fill missing caches, fail if short
 
 # retrieval quality — REQUIRED after any retrieval change (see rules)
-python -m core.evaluation.harness     # doc_hit@k, MRR, phrase_hit, compound_hit
+EURAG_HYDE_MODEL=none python -m core.evaluation.harness   # PIN expansion or it is noise
 python -m infra.scripts.check_links   # every source_url must resolve
 
 # run backend (local single-user, no auth)
@@ -55,7 +59,7 @@ cd frontend/web && npm install && npm run build   # or: npm run dev
 | Path | What |
 |---|---|
 | `core/ingestion/` | loader (`html_to_text`, provenance), article-aware `chunker`, `embedder` |
-| `core/retrieval/` | `bm25`, `vector_store` (Qdrant), `hybrid_retriever` (RRF + rerank + tenant scope), `reranker`, `expansion` (HyDE) |
+| `core/retrieval/` | `bm25`, `vector_store` (Qdrant), `hybrid_retriever` (RRF + rerank + tenant scope), `reranker`, `expansion` (contextualise + HyDE) |
 | `core/generation/` | `answerer` (cite-or-fail + insufficiency marker), `citations`, `llm_client` |
 | `core/security/` | `auth` (JWT, RBAC, audit), `crypto` (AES-256-GCM), `pii` (upload gate) |
 | `core/` | `pipeline` (wires it together), `registry` (SQLite, tenant+cipher), `db` (SQLite/Postgres), `conversations`, `quota`, `config` |
@@ -67,9 +71,17 @@ cd frontend/web && npm install && npm run build   # or: npm run dev
 
 ## How it works (the load-bearing bits)
 
-- **Retrieval**: HyDE-expanded query → BM25 + vector search → RRF fuse →
-  cross-encoder rerank → cap 2 chunks/doc → top-k. Article-aware chunking
-  (headings are hard boundaries; each chunk carries its "Article N —" heading).
+- **Retrieval**: follow-up contextualised → HyDE-expanded query → BM25 + vector
+  search → RRF fuse → cross-encoder rerank → cap 2 chunks/doc → top-k.
+  Article-aware chunking (headings are hard boundaries; each chunk carries its
+  "Article N —" heading).
+- **Follow-ups**: a bare "what if I have 29 people?" has no topic of its own, so
+  when `history` is present `pipeline.query` first rewrites it into a standalone
+  question (`QueryContextualizer`, Haiku). **Contextualisation runs before
+  HyDE** — expanding a fragment just amplifies the wrong topic. The rewrite is
+  what retrieval *and* the answerer see, so the answerer never handles a
+  fragment and cite-or-fail is untouched. Anonymous requests send their turns
+  (capped, untrusted); `/conversations/{id}/messages` reads its own stored chat.
 - **Generation**: model may use only the numbered sources, must cite every
   claim; uncited/mis-cited answers are regenerated then downgraded to verbatim
   quotes. The model appends `INSUFFICIENT_SOURCES` when it can't answer → that
@@ -96,10 +108,17 @@ cd frontend/web && npm install && npm run build   # or: npm run dev
    API keys come from env only.
 5. **Commit/push only when asked.** End commit messages with the
    `Co-Authored-By: Claude …` line. `main` is the default branch.
-6. Keep `docs/` current — the DEVLOG, DATA_SOURCES, SECURITY, PROJECT_PLAN are
-   the project's memory.
+6. Keep `docs/` current — the DEVLOG, UPDATE_LOG, DATA_SOURCES, SECURITY,
+   PROJECT_PLAN are the project's memory. **Every non-obvious choice and every
+   trap that cost you time gets an entry in
+   [`docs/UPDATE_LOG.md`](docs/UPDATE_LOG.md)** — decision + reason, or symptom
+   + fix. The measurements behind it go in the DEVLOG; link, don't duplicate.
 
 ## Gotchas (learned the hard way)
+
+Short form — the standing list a session must know before touching anything.
+Full reasoning, symptoms, and the decisions behind them:
+[`docs/UPDATE_LOG.md`](docs/UPDATE_LOG.md).
 
 - **Chunker or registry-schema changes need a full reseed.** `pipeline.ingest`
   skips documents whose content hash is unchanged, so editing the chunker is a
@@ -144,10 +163,28 @@ cd frontend/web && npm install && npm run build   # or: npm run dev
   auto-HTTPS can never engage.
 - **macOS Docker**: the daemon isn't running by default — `open -a Docker` and
   wait before any `docker` command.
+- **A Linux deploy needs `chown -R 10001:10001 data/raw` before the first
+  `up`.** `data/raw/` is gitignored, so a fresh clone doesn't have it and Docker
+  creates the bind-mount source as `root:root`; the image runs as `USER eurag`
+  (uid 10001) and the seeder dies in ~5s with `PermissionError` on
+  `data/raw/.seed.lock`. **The macOS rehearsal cannot catch this** — Docker
+  Desktop remaps bind-mount ownership, so it only ever fails on Linux.
 - **Cold prod seed is ~3m20s** with a populated `data/raw` (4202 chunks embedded),
   plus ~6 min of scraping if the cache is empty. A re-run is ~4s — all 47
   documents hash-skip, nothing re-embeds (that's D5 holding), so
   `git pull && up -d` is cheap.
+- **The harness is NOT deterministic with HyDE on.** Expansion calls Haiku, so
+  each run gets a different hypothetical document → different candidate pool.
+  A one-case metric delta (the golden set has only 3 compound cases, so one
+  flip = 33pp) is *not* attributable to your change. Pin it before any A/B:
+  `EURAG_HYDE_MODEL=none python -m core.evaluation.harness`.
+- **`EURAG_RERANK_BATCH` is a memory ceiling, not a tuning knob.** fastembed
+  defaults to 64, above every pool `hybrid_retriever` builds (`k*5`: 30 at
+  `top_k=6`, **60 on the escalation path** at `EURAG_ESCALATION_TOP_K=12`), so
+  the whole pool went through in one forward pass and allocated **1.6GB** —
+  which OOM-killed the api container in prod (502s, no traceback, `dmesg` shows
+  `killed process`). Default is now 8: same scores, 5.7× less transient memory,
+  +0.44s. Raising `EURAG_ESCALATION_TOP_K` grows this peak.
 - **HyDE / expansion default ON** (Haiku); decomposition is built but ships OFF
   (measured: no gain over HyDE).
 - Two known phrase-precision misses (GDPR Art. 6 lawful-bases, Late Payment
@@ -170,30 +207,23 @@ cd frontend/web && npm install && npm run build   # or: npm run dev
   `docker compose -f docker-compose.prod.yml --env-file .env.prod.local up -d`
   (see the `.env` gotcha below for why the secrets don't live in `.env`).
 
-## Known production gaps (not yet done)
+## Open work
 
-Being closed by the in-progress batch ([`context_files/PLAN_LIVE_SAFETY.md`](context_files/PLAN_LIVE_SAFETY.md)).
-Blockers first:
-1. ~~**Corpus reproducibility**~~ — **DONE (Phase 1, 2026-07-25)**: seeder
-   service + `--scrape --expect-docs 47` + strict boot.
-2. ~~**Bot protection**~~ — **DONE (Phase 2, 2026-07-25)**: Turnstile gates
-   anonymous questions + registration; sitekey served via `/healthz`, so real
-   keys are a deploy-time env change. (No global $ ceiling — deliberate
-   product choice.)
-3. ~~**Startup guard**~~ — **DONE (Phase 3, 2026-07-25)**: `validate_startup`
-   raises at import on auth+Postgres without `EURAG_JWT_SECRET`; warns when
-   `EURAG_ENCRYPTION_KEY` is unset.
-4. ~~**Prod images/compose not run-verified**~~ — **DONE (Phase 7, 2026-07-25)**:
-   both images build; the full prod stack was brought up locally and smoke-tested
-   end to end (47 docs, tiers, Turnstile, error mapping, rate limit, saved chats,
-   replica kill). Two real bugs found and fixed — see Gotchas. **Still open: the
-   VPS deploy itself** (needs a host, a domain, and real Turnstile keys).
-Also done: ~~LLM-call error handling~~ (Phase 4, 2026-07-25 — failures map to
-400 `byok_key_rejected`/503 + Retry-After instead of raw 500s; anon quota
-refunds on failure; escalation is best-effort); ~~ingest caps, `anon_quota`
-growth, XFF trust, `public/.gitkeep`~~ (Phase 5, 2026-07-25); ~~no CI~~
-(Phase 6, 2026-07-25 — `.github/workflows/ci.yml`: pytest on py3.11 /
-`npm ci && npm run build` on node 22 / postgres:16 parity, on push+PR).
-Deferred beyond the batch:
-registry-uploads-per-instance, accounts have no email (no password reset),
-Google OAuth disabled, no streaming/i18n, no monitoring.
+The live-safety batch is closed and deployed; its phase-by-phase record is in
+[`docs/DEVLOG.md`](docs/DEVLOG.md), not here. **Current state and the live
+to-do list are in [`context_files/HANDOFF.md`](context_files/HANDOFF.md)** —
+that file is the one to read at session start.
+
+Standing gaps, in rough priority order:
+
+1. **Seed lock lives in a bind mount** — move `data/raw/.seed.lock` to
+   `/app/var/.seed.lock` so a Linux deploy stops needing a manual
+   `chown -R 10001:10001 data/raw`.
+2. **No billing alerts.** A public URL spends the server's Anthropic key on
+   anonymous full-quality answers. `docs/DEPLOY.md` §5.6.
+3. **Sizing numbers are macOS-measured** — `docs/DEPLOY.md` §4 should be
+   re-measured on the Linux host.
+4. **The 90-day credit cliff** (trial started 2026-08-08) — `docs/DEPLOY.md` §6.
+
+Deferred: accounts have no email (so no password reset), Google OAuth
+disabled, registry-uploads-per-instance, no streaming, no i18n, no monitoring.

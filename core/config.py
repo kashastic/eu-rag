@@ -64,6 +64,16 @@ class Settings:
     decompose_model: str = field(
         default_factory=lambda: os.environ.get("EURAG_DECOMPOSE_MODEL", "none")
     )
+    # Follow-up contextualisation: rewrites "what if I have 29 people?" into a
+    # standalone question using prior turns, BEFORE retrieval. Costs one Haiku
+    # call, and only on questions that actually carry history — a first
+    # question is untouched. "none" disables (and local single-user mode never
+    # sends history, so it is inert there either way).
+    contextualize_model: str = field(
+        default_factory=lambda: os.environ.get(
+            "EURAG_CONTEXTUALIZE_MODEL", "claude-haiku-4-5"
+        )
+    )
     # cross-encoder reranker: "none" disables; otherwise a fastembed
     # TextCrossEncoder model name. Default measured on the golden harness
     # (DEVLOG 2026-07-05): phrase_hit 82%→88% at doc_hit 100%, costing ~1s
@@ -72,6 +82,17 @@ class Settings:
         default_factory=lambda: os.environ.get(
             "EURAG_RERANKER", "Xenova/ms-marco-MiniLM-L-6-v2"
         )
+    )
+    # Cross-encoder forward-pass batch size. fastembed defaults to 64, which
+    # is above every pool this retriever builds (hybrid_retriever: k*5, so 30
+    # at top_k=6 but 60 on the escalation path at top_k=12) — so the whole
+    # pool went through in ONE pass and the escalation path allocated double
+    # the activations of a normal query. That spike OOM-killed the api
+    # container on a 4GB host in production (DEVLOG 2026-08-09). Scores are
+    # per-pair independent, so this bounds peak memory without changing which
+    # chunks win; harness metrics are unmoved at 8 vs 64.
+    rerank_batch: int = field(
+        default_factory=lambda: int(os.environ.get("EURAG_RERANK_BATCH", "8"))
     )
     # Qdrant: embedded local mode by default; set QDRANT_URL for a server
     qdrant_url: str | None = field(

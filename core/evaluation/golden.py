@@ -35,6 +35,11 @@ class GoldenCase:
     # compound questions: ALL these title markers must appear in the top-k
     # (measures multi-hop / decomposition quality)
     requires_all: tuple[str, ...] = ()
+    # prior (question, answer) turns, oldest first. Non-empty means this is a
+    # FOLLOW-UP: the question is deliberately not self-contained, and retrieval
+    # can only succeed if it is first rewritten against these turns. Answers
+    # are abridged — only their topic is load-bearing.
+    history: tuple[tuple[str, str], ...] = ()
 
 
 CASES: list[GoldenCase] = [
@@ -215,5 +220,55 @@ CASES: list[GoldenCase] = [
         (),
         core=False,
         requires_all=("Geo-blocking", "VAT"),
+    ),
+    # --- follow-ups: the question is NOT self-contained on purpose ---------
+    # Each fails without contextualisation, and the failure is not random:
+    # stripped of its conversation, the question's only lexical signal points
+    # at a different act (a headcount matches Pay Transparency's "fewer than
+    # 100 workers"; a bare "in France" matches nothing at all). Observed live
+    # 2026-08-09 — see docs/UPDATE_LOG.md.
+    GoldenCase(
+        "what if I have 29 people?",
+        "GDPR",
+        ("shall designate a data protection officer",),
+        core=False,
+        history=(
+            (
+                "Do I need a data protection officer for a 30-person company?",
+                "Whether you must appoint a DPO does not depend on headcount."
+                " Under Article 37(1) GDPR it depends on whether you are a"
+                " public authority, or your core activities involve regular"
+                " and systematic monitoring on a large scale, or large-scale"
+                " processing of special categories of data.",
+            ),
+        ),
+    ),
+    GoldenCase(
+        "and how long do I have to report one?",
+        "GDPR",
+        ("not later than 72 hours",),
+        core=False,
+        history=(
+            (
+                "What counts as a personal data breach under the GDPR?",
+                "A personal data breach is a breach of security leading to the"
+                " accidental or unlawful destruction, loss, alteration,"
+                " unauthorised disclosure of, or access to, personal data.",
+            ),
+        ),
+    ),
+    GoldenCase(
+        "what about the withdrawal period?",
+        "Consumer Rights",
+        ("period of 14 days",),
+        core=False,
+        history=(
+            (
+                "What are my obligations when selling to consumers online?",
+                "Distance selling to consumers triggers pre-contractual"
+                " information duties and a right of withdrawal under the"
+                " Consumer Rights Directive.",
+            ),
+        ),
     ),
 ]

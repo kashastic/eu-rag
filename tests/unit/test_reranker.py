@@ -3,7 +3,7 @@
 from core.ingestion.chunker import Chunk
 from core.retrieval.bm25 import BM25Index
 from core.retrieval.hybrid_retriever import HybridRetriever
-from core.retrieval.reranker import get_reranker
+from core.retrieval.reranker import CrossEncoderReranker, get_reranker
 
 
 class _NoVectors:
@@ -73,3 +73,59 @@ def test_get_reranker_none_and_unavailable_model():
     assert get_reranker("") is None
     # unknown model must degrade to no reranking, never raise
     assert get_reranker("no-such/model-anywhere") is None
+
+
+class _RecordingCrossEncoder:
+    """Stands in for fastembed's TextCrossEncoder so no model is downloaded."""
+
+    last_batch_size: int | None = None
+
+    def __init__(self, model_name):
+        self.model_name = model_name
+
+    def rerank(self, query, documents, batch_size=64, **kwargs):
+        _RecordingCrossEncoder.last_batch_size = batch_size
+        return [float(i) for i in range(len(list(documents)))]
+
+
+def _patch_cross_encoder(monkeypatch):
+    import fastembed.rerank.cross_encoder as ce
+
+    _RecordingCrossEncoder.last_batch_size = None
+    monkeypatch.setattr(ce, "TextCrossEncoder", _RecordingCrossEncoder)
+
+
+def test_batch_size_is_forwarded_to_the_model(monkeypatch):
+    """Batch size is the memory ceiling on the escalation path, not a tuning
+    nicety: fastembed defaults to 64, above every pool the retriever builds,
+    so a 60-candidate pool went through in one forward pass and allocated
+    1.6GB — enough to get the api container OOM-killed on a 4GB host
+    (DEVLOG 2026-08-09). If this argument stops being forwarded, peak memory
+    regresses ~5.7x with no other visible symptom, so assert it explicitly."""
+    _patch_cross_encoder(monkeypatch)
+
+    CrossEncoderReranker("any/model", batch_size=8).rank("q", ["a", "b", "c"])
+
+    assert _RecordingCrossEncoder.last_batch_size == 8
+
+
+def test_get_reranker_forwards_batch_size(monkeypatch):
+    _patch_cross_encoder(monkeypatch)
+
+    get_reranker("any/model", batch_size=16).rank("q", ["a", "b"])
+
+    assert _RecordingCrossEncoder.last_batch_size == 16
+
+
+def test_rank_is_order_preserving_regardless_of_batch_size(monkeypatch):
+    """Scores are per-pair independent, so batching changes peak memory and
+    nothing else. Verified end to end on the golden harness: every metric is
+    identical from batch=4 to batch=64 with HyDE disabled (DEVLOG
+    2026-08-09)."""
+    _patch_cross_encoder(monkeypatch)
+    texts = ["a", "b", "c", "d"]
+
+    small = CrossEncoderReranker("any/model", batch_size=2).rank("q", texts)
+    large = CrossEncoderReranker("any/model", batch_size=64).rank("q", texts)
+
+    assert small == large
