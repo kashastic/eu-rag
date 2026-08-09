@@ -46,7 +46,6 @@ CREATE TABLE IF NOT EXISTS users (
     google_sub   TEXT,
     email        TEXT
 );
-CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users (google_sub);
 CREATE TABLE IF NOT EXISTS refresh_tokens (
     jti        TEXT PRIMARY KEY,
     username   TEXT NOT NULL,
@@ -109,10 +108,19 @@ class AuthStore:
     def __init__(self, db: Database, jwt_secret: str):
         self._db = db
         self._secret = jwt_secret
+        # _SCHEMA must contain ONLY statements that are safe against a table
+        # that already exists in its OLD shape: on an existing database every
+        # `CREATE TABLE IF NOT EXISTS` here is a no-op, so anything referencing a
+        # newly-added column would fail — and on Postgres `executescript` runs
+        # the whole thing as one statement, so one failure takes the entire
+        # schema (and app startup) with it. Statements that depend on a new
+        # column belong in the migration list below, which runs AFTER the ALTERs
+        # and guards each statement separately.
         db.executescript(_SCHEMA)
-        # migrate older databases in place — one ALTER per added column, each
-        # independently guarded so a DB that has one but not the other still
-        # gets the missing one
+        # migrate older databases in place — one statement at a time, each
+        # independently guarded so a DB that has some but not others still gets
+        # the missing ones. Order matters: a column must exist before an index
+        # can reference it.
         for ddl in (
             "ALTER TABLE users ADD COLUMN byok_key_enc TEXT",
             "ALTER TABLE users ADD COLUMN byok_set_at DOUBLE PRECISION",

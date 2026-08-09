@@ -59,3 +59,44 @@ def test_conversations_on_postgres(db):
     assert [m["role"] for m in full["messages"]] == ["user", "assistant"]
     assert full["messages"][1]["citations"][0]["title"] == "X"
     assert conv.get(c["id"], _u("intruder")) is None  # isolation holds on PG
+
+
+def test_authstore_migrates_a_pre_google_table(db):
+    """The upgrade path, on the backend prod actually runs.
+
+    This is the case that took the live API down: `executescript` sends the
+    whole schema to Postgres as ONE statement, so a single failing line aborts
+    all of it — and a `CREATE UNIQUE INDEX ... (google_sub)` placed before the
+    ALTER that adds `google_sub` fails on every database that already existed.
+    A fresh DB cannot reproduce it, because there the CREATE TABLE already has
+    the column.
+    """
+    table = "users"
+    db.executescript("DROP TABLE IF EXISTS users CASCADE;")
+    db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            username     TEXT PRIMARY KEY,
+            salt         TEXT NOT NULL,
+            pw_hash      TEXT NOT NULL,
+            role         TEXT NOT NULL,
+            tenant       TEXT NOT NULL,
+            created_at   DOUBLE PRECISION NOT NULL,
+            byok_key_enc TEXT
+        );
+        """
+    )
+    db.execute(
+        "INSERT INTO users (username, salt, pw_hash, role, tenant, created_at)"
+        " VALUES ('legacyuser', 'aa', 'bb', 'admin', 'legacyuser', 1.0)"
+    )
+
+    store = AuthStore(db, "s" * 40)  # must not raise
+    row = db.query_one("SELECT * FROM users WHERE username = 'legacyuser'")
+    assert row["google_sub"] is None and row["byok_set_at"] is None
+    assert store.upsert_google_user("pg-sub-1", "pguser@example.com").username == "pguser"
+    names = {r["indexname"] for r in db.query(
+        "SELECT indexname FROM pg_indexes WHERE tablename = %s", (table,)
+    )}
+    assert "users_google_sub" in names
+    AuthStore(db, "s" * 40)  # a redeploy re-runs this — idempotent

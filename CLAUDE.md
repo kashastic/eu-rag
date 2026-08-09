@@ -217,6 +217,14 @@ Full reasoning, symptoms, and the decisions behind them:
   fabricated markers, long uncited bodies, and uncited answers with no marker.
   Don't "tighten" this back to always-require-a-citation — that rejected the
   model for obeying its own prompt and cost 4 LLM calls per refusal.
+- **A fresh database cannot test a migration.** `_SCHEMA` may contain only
+  statements valid against the table's OLD shape — anything referencing a newly
+  added column goes after the `ALTER`s in the guarded migration list. A
+  `CREATE UNIQUE INDEX` on a new column, placed in `_SCHEMA`, took the live API
+  down at boot: every test built its DB from scratch, so nothing caught it. On
+  Postgres `executescript` is ONE statement, so one bad line discards the whole
+  schema. Symptom to recognise: `/healthz` returns Caddy's error page, so the UI
+  shows **0 documents** and every runtime-config feature vanishes at once.
 - **Google sign-in is the ID-token flow — there is no client secret.**
   `EURAG_GOOGLE_CLIENT_ID` is *public* (it ships to every browser); don't treat
   it as a secret or "hide" it in a way that breaks the runtime `/healthz`

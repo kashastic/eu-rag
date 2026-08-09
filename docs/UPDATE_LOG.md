@@ -22,6 +22,35 @@ them. Don't paste the same paragraph into three files — link.
 
 ## 2026-08-09 (Google Sign-In)
 
+### [GOTCHA] Anything in `_SCHEMA` that references a NEW column takes the API down on every existing database
+
+**Symptom.** Straight after a deploy: `/healthz` returned no JSON at all
+(`python3 -m json.tool` → *"Expecting value: line 1 column 1"* — that is Caddy's
+error page, not an API response), the UI showed **0 documents indexed** instead
+of 47, and the Google button never appeared. Three symptoms, one cause: the API
+container never finished starting, and the frontend reads `documents` *and*
+`google_client_id` from `/healthz`, so a dead healthz blanks both.
+
+**Why.** `AuthStore.__init__` runs `db.executescript(_SCHEMA)` and *then* the
+`ALTER TABLE` migrations. A `CREATE UNIQUE INDEX ... ON users (google_sub)` had
+been added to `_SCHEMA` — so on an **existing** database, where every
+`CREATE TABLE IF NOT EXISTS` is a no-op and `google_sub` does not exist yet, the
+index statement raised `UndefinedColumn` out of `__init__`, out of the lifespan,
+and the app never came up. On Postgres it is worse than one bad line:
+`executescript` sends the whole script as a **single** statement, so one failure
+discards all of it.
+
+**Why no test caught it.** Every test built its database from scratch, where the
+`CREATE TABLE` already contains the new column and the index succeeds. *A fresh
+database cannot test a migration.* There are now two SQLite tests and one
+Postgres test that start from the pre-Google table on purpose.
+
+**The rule.** `_SCHEMA` may contain **only** statements that are correct against
+the table's *old* shape. Anything that depends on a newly added column —
+indexes, constraints, backfills — belongs after the `ALTER`s, in the
+individually-guarded migration list. And verify a schema change by opening it on
+a copy of the old database, not a new one.
+
 ### [DECISION] Google sign-in uses the ID-token flow, so there is no client secret
 
 **Choice.** Google Identity Services hands the browser a signed ID token; the

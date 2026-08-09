@@ -1,8 +1,10 @@
+import os
 import time
 
 import jwt
 import pytest
 
+from core.db import Database
 from core.security.auth import AuthError, AuthStore, question_hash
 
 SECRET = "x" * 40  # ≥32 bytes, silences the jwt short-key warning
@@ -105,3 +107,63 @@ def test_audit_appends_and_exposes_no_mutation(store):
 def test_question_hash_is_not_reversible():
     h = question_hash("Do I need a DPO?")
     assert "DPO" not in h and len(h) == 16
+
+
+# --- upgrading an EXISTING database ---------------------------------------
+# Every other test here starts from an empty DB, where CREATE TABLE builds the
+# current shape and any migration is a no-op. That is exactly the case that
+# cannot catch a bad migration. These start from an old table on purpose.
+
+_PRE_GOOGLE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    username     TEXT PRIMARY KEY,
+    salt         TEXT NOT NULL,
+    pw_hash      TEXT NOT NULL,
+    role         TEXT NOT NULL,
+    tenant       TEXT NOT NULL,
+    created_at   DOUBLE PRECISION NOT NULL,
+    byok_key_enc TEXT
+);
+"""
+
+
+def _legacy_db(tmp_path):
+    """A database as it existed before byok_set_at / google_sub / email."""
+    db = Database(None, sqlite_path=tmp_path / "legacy.db")
+    db.executescript(_PRE_GOOGLE_SCHEMA)
+    db.execute(
+        "INSERT INTO users (username, salt, pw_hash, role, tenant, created_at)"
+        " VALUES ('alice', ?, ?, 'admin', 'alice', 1.0)",
+        (os.urandom(16).hex(), "deadbeef"),
+    )
+    db._conn.commit()
+    db.close()
+    return Database(None, sqlite_path=tmp_path / "legacy.db")
+
+
+def test_opening_a_pre_google_database_migrates_instead_of_exploding(tmp_path):
+    """Regression: the google_sub unique index used to live in _SCHEMA, which
+    runs BEFORE the ALTERs that add the column. On a fresh DB the CREATE TABLE
+    already had the column so it passed; on an existing one it raised
+    'no such column: google_sub' out of AuthStore.__init__, which took the whole
+    API down at boot. Anything referencing a new column must run after the
+    ALTERs."""
+    store = AuthStore(_legacy_db(tmp_path), "s" * 32)
+    # the pre-existing account survived and still works
+    row = store._db.query_one("SELECT * FROM users WHERE username = 'alice'")
+    assert row["google_sub"] is None and row["email"] is None
+    assert row["byok_set_at"] is None
+    # ...and the new paths work on the migrated table
+    principal = store.upsert_google_user("sub-1", "bob@example.com")
+    assert principal.username == "bob"
+    store.set_byok("alice", "enc-blob")
+    assert store.byok_set_at("alice") > 0
+
+
+def test_migration_is_idempotent(tmp_path):
+    """Boot, boot again — every deploy re-runs this path."""
+    db_path = tmp_path / "legacy.db"
+    AuthStore(_legacy_db(tmp_path), "s" * 32)
+    for _ in range(2):
+        store = AuthStore(Database(None, sqlite_path=db_path), "s" * 32)
+        assert store.register("carol" + str(_), "longpassword1").username
