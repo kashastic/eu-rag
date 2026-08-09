@@ -2,6 +2,142 @@
 
 Running log of build sessions. Newest first.
 
+## 2026-08-09 (web UI) — the bot gate stops being the front door
+
+Two complaints, one root cause: the Turnstile widget was rendered eagerly and
+the UI was wired to *wait* on it.
+
+**Measured before.** Driven with Chrome via `playwright-core` against a local
+`uvicorn` + `next dev` pair, using Cloudflare's own test keys (sitekey
+`1x00000000000000000000AA` always passes, `3x00000000000000000000FF` forces an
+interactive challenge; secret `1x0000000000000000000000000000000AA`):
+
+| | before | after |
+|---|---|---|
+| `.turnstile` height, anonymous chat, idle | **73px** (visible checkbox) | **0px** |
+| `.turnstile` height while a challenge is up | 73px | 73px (unchanged — this is the case it *should* show) |
+| Ask button on load | `disabled` until solved | enabled |
+| Create-account button | `disabled` until solved | enabled |
+| Widgets on screen with the register modal open | 2 visible boxes | 0 |
+| `challenges.cloudflare.com` blocked → Ask | **`disabled` forever, no message** | enabled; error naming the blocked host |
+| `/login` → create account | **403 `turnstile_failed`, unrecoverable** | works |
+
+**What changed.** `Turnstile` renders `appearance: "interaction-only"` +
+`execution: "execute"` and exposes `getToken()`; `send()` and the register
+submit mint a fresh single-use token at submit time. `/login` became a redirect
+to `/chat?auth=login` — it was a pre-bot-gate copy of the form that posted
+`/auth/register` with no token and no widget, and nothing linked to it, so it
+had been broken in prod since the gate shipped. Reasoning for both:
+[UPDATE_LOG.md](UPDATE_LOG.md).
+
+**Verified end to end**, each in a fresh browser context against the real
+Cloudflare endpoint:
+
+- anonymous question → invisible challenge → `200 POST /query`, answer with 2
+  resolvable citations, `1 free question left`;
+- `/login` → modal in sign-in mode → create account → `200` register + login +
+  `/account`, sidebar shows the username; sign out → sign back in → works;
+- quota wall (`EURAG_FREE_ANON_QUESTIONS=0`) → forced non-dismissable modal in
+  register mode → account created and signed in;
+- forced-interactive sitekey → container goes 0px → 73px, class flips to
+  `turnstile active`, thread reads *"Waiting for the Cloudflare check below…"*;
+- Cloudflare blocked → both entry points fail with the message instead of
+  hanging.
+
+`npx tsc --noEmit` clean, `next build` clean (`/login` 332 B, static), Python
+suite unchanged at **237 passed / 6 skipped** (no backend change — the server's
+fail-closed policy on a missing token is deliberately untouched).
+
+## 2026-08-09 (telemetry) — making the escalation rate countable
+
+Started from "how do we escalate fewer questions?" and got no further than the
+first step: **the escalation rate was not measurable.** The eval harness is
+retrieval-only (`doc_hit` / `doc_mrr` / `phrase_hit`) and never calls the
+answerer, so it cannot see escalation at all. In prod the only trace was
+`low-confidence answer — escalating to …`, a bare count with nothing to divide
+by: every other per-query log line fires on a branch
+(`query industry context:` only with an industry set, the contextualiser line
+only on follow-ups), so **there was no denominator anywhere.**
+
+Confirmed by trying it. A first pass at counting returned `0` and `0`, which
+was uninterpretable — no traffic, no log history, and a broken pattern all look
+identical without a denominator. One of the two patterns also contained the em
+dash from the source string, which would have failed on encoding alone.
+
+**Shipped:** one unconditional `query outcome:` line at the end of
+`pipeline.query`, ASCII-only:
+
+```
+query outcome: mode=llm escalated=True primary_reason=uncited insufficient=False citations=4
+```
+
+Escalation rate is now `grep -c "escalated=True"` over `grep -c "query
+outcome:"`, and `primary_reason` says which of two unrelated causes paid for it.
+
+**`AnswerResult.insufficient_reason`** carries that cause — `marker` (the model
+said the sources don't cover the question), `uncited` (two generations failed
+citation validation), `no_sources` (retrieval returned nothing). The escalation
+gate still reads `insufficient` alone; this is telemetry only, and it is
+deliberately **not** in `to_dict()` — the API response shape is a contract.
+
+**The measurement this exists to take.** A probe confirmed that an honest
+zero-citation refusal — exactly what `SYSTEM_PROMPT` asks for when the sources
+don't cover the question — is rejected by `validate_answer` (which requires
+≥1 citation unconditionally), retried, rejected again, downgraded to extractive
+with `insufficient=True`, and *then* escalated, where the strong model repeats
+the same loop:
+
+```
+primary calls: 2   escalation calls: 2   mode: extractive   citations: 3
+```
+
+Four LLM calls, 2 Sonnet + 2 Opus, against a cost model that assumes one of
+each — and the user gets three verbatim quotes from the chunks the model just
+refused to use, instead of the honest "not in the corpus" it wrote. Every
+off-corpus question takes this path, because nothing thresholds relevance: RRF
+ranks by relative position and the cross-encoder only reorders, so
+`mode="no_sources"` fires only on a literally empty result, which a 47-document
+corpus never returns.
+
+### Then the fix, same session
+
+The instrument was built to shipped separately so the "before" rate could be
+captured first. That ordering was overtaken — the fix was requested immediately,
+and it cost nothing, because the log window held **no traffic to measure**
+(the first count came back `0` against a `0` denominator). Nothing was lost;
+the telemetry's value is now forward-looking.
+
+`answer_question` accepts a zero-citation answer **when the insufficiency
+marker is present and the text is short** (`MAX_UNCITED_REFUSAL_CHARS = 600`).
+
+Two guards keep the citation discipline intact, and both are tested:
+
+- **`not used`** — an out-of-range marker leaves `used` non-empty, so a refusal
+  citing a fabricated `[9]` is still rejected. The only failure this rescues is
+  literally "no citations."
+- **the length cap** — a sentence or two is a refusal; a long uncited body is a
+  substantive answer with the marker tacked on, and shipping *that* would be
+  the uncited claim the whole product forbids. Over the cap, the old extractive
+  downgrade still applies.
+
+An answer with no marker is untouched — the model believing it answered, with
+no citation, remains a validation failure.
+
+**Effect on the path measured above** — 4 LLM calls become 2:
+
+```
+before:  primary 2 + escalation 2  -> mode=extractive, 3 misleading quotes
+after:   primary 1 + escalation 1  -> mode=llm, the model's own refusal
+```
+
+**The escalation still fires, and should.** `primary_reason` moves from
+`uncited` to `marker`: a model reporting a corpus gap is exactly the case
+deeper retrieval exists to rescue. This change halves the price of finding out
+and fixes what ships when the rescue fails; the escalation *count* is a
+different lever (the missing relevance floor — HANDOFF open item 3).
+
+Tests: 237 pass / 6 skip (+16). No harness run — retrieval is untouched.
+
 ## 2026-08-09 — live on a public URL, the first production OOM, and follow-ups
 
 Three things in one day: the deploy, an OOM the deploy exposed, and a retrieval
@@ -71,6 +207,44 @@ them would test nothing. Same treatment as a `core=False` case whose document
 isn't in the corpus: skip honestly rather than fail or silently pass.
 
 Tests 212 → **220 passed, 6 skipped**.
+
+### …and the fix had a bug of its own: it translated the question
+
+Deployed, the follow-up resolved correctly to GDPR Article 37 — and answered
+**in Spanish** to an English question.
+
+`answerer` already promises *"write the answer in the same language the
+question is written in — never switch languages on your own"*, and it obeyed:
+it matched the language of the question **it was handed**, which was the
+contextualiser's rewrite. `_CONTEXTUALIZE_SYSTEM` said nothing about language.
+**Inserting a rewrite in front of a component moves that component's
+input-shaped promises onto the rewrite** — the guarantee was still enforced, on
+text the user never wrote.
+
+Two things went wrong while fixing it, both worth recording:
+
+1. **Emphasis backfired.** The first attempt led with the language rule, hard
+   ("ALWAYS … SAME LANGUAGE … never translate"). The model read it as *don't
+   change the question* and stopped rewriting altogether. The working version
+   leads with the rewrite task, shows a concrete before/after example, and
+   demotes language to a subordinate clause: *"resolving references is not
+   translating"*.
+2. **The verification script was measuring nothing.** It imported
+   `core.generation.llm_client` directly, so `core/config.py`'s import-time
+   `_load_dotenv()` never ran, `ANTHROPIC_API_KEY` was unset, `get_llm_client`
+   returned `ExtractiveClient`, and `standalone()`'s deliberately-silent
+   fallback returned the raw query every time. That looked exactly like a total
+   regression. **Check `type(llm).__name__` before believing an LLM result.**
+
+Verified against real Haiku once the client was actually an `AnthropicClient`:
+an English follow-up rewrites to English (4/4), a French one to French (3/3),
+an already-standalone question passes through untouched. Multi-constraint
+threads survive ("German clinic … patient health records … 29 employees" all
+carried, 3/3), and a mid-thread correction overrides correctly ("actually we
+are a public hospital" → the rewrite says public hospital, not clinic).
+
+Harness unmoved by the prompt change: `doc_hit=100%`, `doc_mrr=1.00`,
+`phrase_hit=94%`, all three follow-ups rank 1. Tests **221 passed, 6 skipped**.
 
 ### Live deploy
 

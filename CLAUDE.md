@@ -31,7 +31,7 @@ numbers is [`docs/DEVLOG.md`](docs/DEVLOG.md); dated decisions and gotchas —
 # env (Python 3.11+; venv already exists at .venv)
 source .venv/bin/activate
 
-# tests — 220 pass / 6 skip, fully offline (hash embedder, no API key needed)
+# tests — 237 pass / 6 skip, fully offline (hash embedder, no API key needed)
 .venv/bin/python -m pytest -q
 EURAG_LIVE_TESTS=1 pytest tests/test_hardening.py -q        # opt-in live LLM test
 EURAG_TEST_DATABASE_URL=postgresql://… pytest tests/test_postgres.py   # opt-in PG parity
@@ -84,9 +84,15 @@ cd frontend/web && npm install && npm run build   # or: npm run dev
   (capped, untrusted); `/conversations/{id}/messages` reads its own stored chat.
 - **Generation**: model may use only the numbered sources, must cite every
   claim; uncited/mis-cited answers are regenerated then downgraded to verbatim
-  quotes. The model appends `INSUFFICIENT_SOURCES` when it can't answer → that
-  triggers the **escalation cascade** (a cheap primary model, one retry on a
-  stronger model over deeper retrieval).
+  quotes. **One exception**: an *honest refusal* may cite nothing — the model
+  appends `INSUFFICIENT_SOURCES` when it can't answer, and a short uncited
+  answer carrying that marker is valid (see Gotchas). The marker triggers the
+  **escalation cascade** (a cheap primary model, one retry on a stronger model
+  over deeper retrieval).
+- **Per-query telemetry**: `pipeline.query` emits one `query outcome:` line per
+  query — the denominator for escalation rate. `AnswerResult.insufficient_reason`
+  records *why* an answer was insufficient (`marker` / `uncited` / `no_sources`);
+  the escalation gate still reads `insufficient` alone.
 - **Tenancy**: every chunk has a tenant; `Registry.get_chunks(ids, tenants)` is
   the ONE hard gate. Official corpus = tenant `public`; each user gets a private
   tenant. Isolation is enforced in one place and adversarially tested.
@@ -173,6 +179,18 @@ Full reasoning, symptoms, and the decisions behind them:
   plus ~6 min of scraping if the cache is empty. A re-run is ~4s — all 47
   documents hash-skip, nothing re-embeds (that's D5 holding), so
   `git pull && up -d` is cheap.
+- **A rewrite step inherits the promises of whatever it feeds.** `answerer`
+  promises to answer in the question's language — but it only sees the
+  contextualiser's rewrite, so when that rewrite translated, an English
+  question came back answered in Spanish. Before adding any pre-retrieval or
+  pre-generation rewrite, re-read `answerer`'s prompt and carry every
+  input-shaped promise into the new step.
+- **`.env` is loaded by importing `core.config`** (import-time `_load_dotenv()`).
+  A script that imports `core.generation.llm_client` directly gets no key,
+  silently falls back to `ExtractiveClient`, and every LLM helper returns its
+  no-op fallback — which looks exactly like a broken change. `import
+  core.config` first, and **check `type(llm).__name__` before trusting any
+  result**.
 - **The harness is NOT deterministic with HyDE on.** Expansion calls Haiku, so
   each run gets a different hypothetical document → different candidate pool.
   A one-case metric delta (the golden set has only 3 compound cases, so one
@@ -185,6 +203,28 @@ Full reasoning, symptoms, and the decisions behind them:
   which OOM-killed the api container in prod (502s, no traceback, `dmesg` shows
   `killed process`). Default is now 8: same scores, 5.7× less transient memory,
   +0.44s. Raising `EURAG_ESCALATION_TOP_K` grows this peak.
+- **`query outcome:` is the one unconditional per-query log line** — every other
+  one fires on a branch, so it is the only denominator you have. Escalation rate
+  = `grep -c "escalated=True"` over `grep -c "query outcome:"`; `primary_reason`
+  says whether an escalation was a corpus gap (`marker`) or a citation-format
+  failure (`uncited`). Keep grep-targeted log strings **ASCII** — a count of the
+  escalation line once failed on the em dash in it.
+- **An honest refusal is allowed to cite nothing** (marker present, ≤600 chars —
+  `MAX_UNCITED_REFUSAL_CHARS`). Everything else uncited is still rejected:
+  fabricated markers, long uncited bodies, and uncited answers with no marker.
+  Don't "tighten" this back to always-require-a-citation — that rejected the
+  model for obeying its own prompt and cost 4 LLM calls per refusal.
+- **The Turnstile widget is invisible and runs at submit time**
+  (`interaction-only` + `execution: "execute"`, one fresh single-use token per
+  submit). **Never re-gate a button on it solving** — the old always-visible
+  widget put a checkbox above the composer on every page load and left Ask *and*
+  Create-account dead with no error whenever the challenge couldn't run.
+- **The bot gate is skipped when no `EURAG_TURNSTILE_SECRET` is set**, so an
+  auth-flow bug can be invisible locally and fatal in prod (that is how
+  `/login` shipped unable to register). Rehearse with Cloudflare's test keys —
+  sitekey `1x00000000000000000000AA` / `3x00000000000000000000FF`, secret
+  `1x0000000000000000000000000000000AA` — passed **on the command line, never
+  in `.env`**.
 - **HyDE / expansion default ON** (Haiku); decomposition is built but ships OFF
   (measured: no gain over HyDE).
 - Two known phrase-precision misses (GDPR Art. 6 lawful-bases, Late Payment
@@ -216,14 +256,18 @@ that file is the one to read at session start.
 
 Standing gaps, in rough priority order:
 
-1. **Seed lock lives in a bind mount** — move `data/raw/.seed.lock` to
+1. **No billing alerts.** A public URL spends the server's Anthropic key on
+   anonymous full-quality answers. `docs/DEPLOY.md` §5.6.
+2. **Escalation cost — count it before tuning it.** The `query outcome:`
+   telemetry exists for this and has **not been read against real traffic yet**.
+   The open lever on escalation *count* is that nothing thresholds relevance, so
+   an off-corpus question always reaches the LLM. Full list: HANDOFF item 3.
+3. **Seed lock lives in a bind mount** — move `data/raw/.seed.lock` to
    `/app/var/.seed.lock` so a Linux deploy stops needing a manual
    `chown -R 10001:10001 data/raw`.
-2. **No billing alerts.** A public URL spends the server's Anthropic key on
-   anonymous full-quality answers. `docs/DEPLOY.md` §5.6.
-3. **Sizing numbers are macOS-measured** — `docs/DEPLOY.md` §4 should be
+4. **Sizing numbers are macOS-measured** — `docs/DEPLOY.md` §4 should be
    re-measured on the Linux host.
-4. **The 90-day credit cliff** (trial started 2026-08-08) — `docs/DEPLOY.md` §6.
+5. **The 90-day credit cliff** (trial started 2026-08-08) — `docs/DEPLOY.md` §6.
 
 Deferred: accounts have no email (so no password reset), Google OAuth
 disabled, registry-uploads-per-instance, no streaming, no i18n, no monitoring.

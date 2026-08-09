@@ -20,7 +20,189 @@ them. Don't paste the same paragraph into three files — link.
 
 ---
 
+## 2026-08-09 (web UI)
+
+### [DECISION] Turnstile is invisible and runs at submit time, never on page load
+
+**Choice.** `components/Turnstile.tsx` renders with `appearance:
+"interaction-only"` + `execution: "execute"` and exposes one imperative method,
+`getToken()`. Callers mint a fresh single-use token **when the form is
+submitted**. No button is ever disabled waiting for a challenge.
+
+**Why.** The old widget rendered `appearance: "always"` on mount and the parent
+gated Ask / Create-account on `!tsToken`. Three things fell out of that, and the
+third is the serious one:
+
+1. A **72px Cloudflare checkbox sat permanently above the composer** on every
+   anonymous page load — the first thing a visitor saw on a page whose whole
+   pitch is "ask a question."
+2. It solved on load, so by the time a visitor typed a question the token could
+   already be minutes into its 300s life. Execute-on-demand is always fresh.
+3. **A challenge that never completes left a dead UI with no error text.**
+   Measured with `context.route(...abort())` on `challenges.cloudflare.com`:
+   Ask *and* Create-account were `disabled` forever and nothing on screen said
+   why. Any ad blocker, privacy extension, corporate proxy, or sitekey/domain
+   mismatch reproduces it — and a sitekey mismatch is exactly the failure a
+   fresh deploy is most likely to hit.
+
+**The general rule.** *Never gate a submit button on a third-party widget's
+success.* Ask for the token at submit time, and treat "couldn't get one" as an
+error you show, not a state you sit in. `TurnstileUnavailableError` carries a
+visitor-facing message naming the likely cause (blocked
+`challenges.cloudflare.com`); the server's fail-closed policy on a missing token
+is unchanged — see [SECURITY.md](SECURITY.md).
+
+**Two details worth keeping.** The container is a **0px box** until Cloudflare
+paints a challenge into it, so spacing is driven by an `.active` class set from
+`before-interactive-callback` / `after-interactive-callback` — the widget lives
+in a shadow root, so there is no child selector (`:has(iframe)` matches
+nothing). And `CHALLENGE_TIMEOUT_MS` is **120s**, not 30s: an interactive
+challenge is waiting on a person noticing a widget that just appeared. While it
+is up, the thread says "Waiting for the Cloudflare check below" instead of
+"Consulting the corpus", which would be a lie.
+
+### [GOTCHA] A second copy of a form is a second thing to keep correct — `/login` had rotted
+
+**Symptom.** Creating an account at `/login` failed with *"Verification failed —
+please retry the challenge"* on any deploy with the bot gate on, with no way to
+recover from the page.
+
+**Why.** `app/login/page.tsx` was a standalone copy of the sign-in form written
+before the bot gate existed. It posted `/auth/register` with **no Turnstile
+token and no widget to produce one**, so `api/routes/auth.register` rejected it
+every single time. The modal on `/chat` had been updated; this copy had not, and
+nothing linked to it (`/` redirects to `/chat`), so it was never exercised.
+Locally it "worked" because no Turnstile secret is configured — the gate is
+skipped, which is exactly why this only ever failed in production.
+
+**Fix.** `/login` is now a redirect to `/chat?auth=login`; the modal is the one
+sign-in UI. The query param is read from `window.location` rather than
+`useSearchParams` so the client page still prerenders without a Suspense
+boundary.
+
+**The general rule.** When a gate is added to one entry point, grep for the
+other callers of the endpoint it protects — a duplicate form that isn't linked
+is a duplicate form nobody will notice is broken.
+
 ## 2026-08-09
+
+### [GOTCHA] A per-query metric needs an unconditional log line, or it has no denominator
+
+**Symptom.** Counting production escalations returned `0` and `0`. Nothing in
+that result distinguishes "it never happened" from "there was no traffic" from
+"the log history was wiped by a redeploy" from "the grep pattern was wrong."
+
+**Why.** Every per-query log line in the pipeline fired on a *branch* —
+`query industry context:` only when an industry is set, the contextualiser line
+only on follow-ups, the escalation line only on escalation. So the numerator
+had a log and the denominator had none. A second trap sat underneath: one of
+the patterns contained the **em dash** from `"low-confidence answer — escalating
+to %s"`, which can fail on encoding before it ever reaches a real question about
+traffic.
+
+**Fix.** `pipeline.query` now emits exactly one `query outcome:` line per query,
+unconditionally and in ASCII, with the fields needed to divide:
+`mode`, `escalated`, `primary_reason`, `insufficient`, `citations`.
+
+**The general rule.** Before instrumenting a rate, ask what emits the
+denominator. If the answer is "the same branch as the numerator," the number
+will be uninterpretable no matter how carefully it is counted. And keep log
+strings intended for grepping ASCII-only.
+
+### [DECISION] An honest refusal may cite nothing — but only if it is short
+
+**Choice.** `answer_question` accepts a zero-citation answer when the
+insufficiency marker is present and the text is ≤ `MAX_UNCITED_REFUSAL_CHARS`
+(600). Longer uncited bodies, fabricated markers, and uncited answers without
+the marker all keep the old extractive downgrade.
+
+**Why.** `SYSTEM_PROMPT` tells the model to cite nothing when the sources don't
+cover the question; `validate_answer` required ≥1 citation unconditionally. The
+model was being **rejected for obeying** — refusal, retry, refusal, downgrade to
+verbatim quotes from the very chunks it had just refused to use, then escalation
+repeating the whole loop on the expensive model. Four LLM calls, and a
+user-facing answer worse than the one the model wrote. Numbers in
+[`DEVLOG.md`](DEVLOG.md).
+
+**Why a length cap rather than trusting the marker.** The marker alone is not
+enough: a model could emit a full substantive answer with `INSUFFICIENT_SOURCES`
+tacked on, and accepting that would ship an uncited legal claim — precisely what
+citation enforcement exists to prevent. A refusal is a sentence or two. Length
+is a crude signal, but it fails in the safe direction (a long refusal merely
+gets the old behaviour), which no content heuristic would.
+
+**The `not used` condition is load-bearing**, not redundant with "no citations":
+an out-of-range marker leaves `used` non-empty, so a refusal citing a
+hallucinated `[9]` is still rejected. The only validation failure this rescues
+is the literal absence of citations.
+
+**What it does not do.** The escalation still fires — `primary_reason` just
+moves from `uncited` to `marker`. A model reporting a corpus gap is the case
+deeper retrieval exists to rescue. This halves the cost of that path; reducing
+the escalation *count* needs the relevance floor (HANDOFF open item 3).
+
+### [DECISION] Instrument the escalation rate before fixing what inflates it
+
+**Choice.** The `query outcome:` telemetry was built to ship ahead of the fix
+above, so the pre-fix rate could be measured. **In the event both shipped in the
+same session** — the fix was requested immediately, and the ordering cost
+nothing because the log window contained no traffic to measure (the first count
+came back `0` over a `0` denominator).
+
+**Why it is still recorded.** The reasoning holds for the next one: a fix and
+its own measurement are entangled, and shipping them together forfeits the
+evidence of whether the fix was worth making. It was safe to collapse here only
+because the "before" number was known to be empty. Check that before collapsing
+them again.
+
+**Reversible.** The telemetry is one log line and one unexposed dataclass
+field; nothing downstream reads them.
+
+### [GOTCHA] A rewrite step upstream of a guarantee must carry that guarantee
+
+**What.** After follow-up contextualisation shipped, an **English** question
+came back **answered in Spanish** in production.
+
+**Why.** `answerer`'s prompt already says *"Write the answer in the same
+language the question is written in — never switch languages on your own."*
+It obeyed perfectly — it answered in the language of the question **it was
+handed**, and that question was the contextualiser's rewrite, which had
+silently translated. The guarantee lived at the answerer, but the answerer no
+longer sees the user's words.
+
+**The general rule.** Inserting a rewrite step in front of a component that
+promises something about its input **moves the responsibility for that promise
+to the rewrite**. Before adding another pre-retrieval or pre-generation
+rewrite, re-read `answerer`'s prompt and carry every input-shaped promise into
+the new step.
+
+**Do this.** `_CONTEXTUALIZE_SYSTEM` now pins the output language, and
+`tests/unit/test_expansion.py` asserts the constraint is still in the prompt —
+behaviour depends on a model, but deleting the line would reintroduce the bug
+invisibly.
+
+**Also learned here:** phrasing matters more than emphasis. The first attempt
+put the language rule first and stated it forcefully; the model read it as
+"don't change the question" and stopped rewriting entirely. The working version leads
+with the rewrite task, gives a concrete before/after example, and states the
+language rule as a subordinate constraint ("resolving references is not
+translating").
+
+### [GOTCHA] `.env` only loads if `core.config` is imported
+
+**What.** A scratch script that imported `core.generation.llm_client` directly
+got `ExtractiveClient` and every LLM call silently fell back to the raw query —
+making a prompt change look like a total regression when nothing was wrong.
+
+**Why.** `core/config.py` calls `_load_dotenv()` **at import time**. Import
+`core.config` (or anything that pulls it in, like `core.pipeline`) and the key
+is present; skip it and `ANTHROPIC_API_KEY` is simply unset.
+
+**Do this.** Put `import core.config` at the top of any ad-hoc script that
+touches an LLM, and **check `type(llm).__name__` before trusting a result** —
+`ExtractiveClient` means you measured nothing. The `standalone()` fallback is
+deliberately silent on error, which makes this failure look like a bad rewrite
+rather than a missing key.
 
 ### [GOTCHA] A follow-up question has no topic of its own
 
@@ -195,7 +377,29 @@ the $300 / 90-day trial. Post-credit target is Hetzner `CAX21` (~€7/month, ARM
 first question. ARM suits Hetzner because the original images were built
 `linux/arm64` — note GCP `e2` is x86_64, so images are built **on the VM**.
 
-### [DECISION] `EURAG_FREE_ANON_QUESTIONS` stays at 3
+### [DECISION] `EURAG_FREE_ANON_QUESTIONS` drops to 2 — supersedes "stays at 3"
+
+**Choice.** Two free anonymous questions, not three. Default changed in
+`core/config.py`, and the var is now passed through to the api container in
+`docker-compose.prod.yml`.
+
+**Why.** User's call, same day as the entry below. Two is still enough to show
+what the product does (ask something, ask a follow-up) while cutting the
+per-visitor exposure on the server's Anthropic key by a third — and the follow-up
+is the more expensive path, since contextualisation adds a Haiku call on top of
+the answer. Billing alerts are still unset (HANDOFF open item 2), so the number
+is currently the *only* live cost control.
+
+**The passthrough matters as much as the number.** The api service has no
+`env_file`; it lists its environment explicitly. `EURAG_FREE_ANON_QUESTIONS` was
+not in that list, so putting it in the VM's `.env` only fed compose
+interpolation, never the container — the code default silently won and the
+"reversible with one env var" claim below was false in prod. Now it is true.
+
+**Reversible.** `EURAG_FREE_ANON_QUESTIONS` in the VM's `.env`; `0` makes the
+deployment BYOK-only.
+
+### [DECISION] ~~`EURAG_FREE_ANON_QUESTIONS` stays at 3~~ (superseded above)
 
 **Choice.** Keep 3 free anonymous questions on a public URL, and control cost at
 the source instead.
