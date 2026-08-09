@@ -18,6 +18,7 @@ import {
   TurnstileUnavailableError,
   type TurnstileHandle,
 } from "@/components/Turnstile";
+import { GoogleSignIn } from "@/components/GoogleSignIn";
 
 const STARTERS = [
   "Do I need a data protection officer for a 30-person company?",
@@ -41,6 +42,7 @@ export default function ChatPage() {
   // bot gate: sitekey comes from /healthz at runtime. The widget is invisible
   // and only runs at submit time, so nothing here gates the composer.
   const [sitekey, setSitekey] = useState<string | null>(null);
+  const [googleClientId, setGoogleClientId] = useState<string | null>(null);
   const tsRef = useRef<TurnstileHandle>(null);
   // true only while Cloudflare has an interactive challenge on screen
   const [challenging, setChallenging] = useState(false);
@@ -59,6 +61,7 @@ export default function ChatPage() {
     if (health) {
       setDocuments(health.documents);
       setSitekey(health.turnstile_sitekey ?? null);
+      setGoogleClientId(health.google_client_id ?? null);
     }
     if (getToken()) {
       try {
@@ -347,6 +350,7 @@ export default function ChatPage() {
           forced={loginForced}
           initialMode={loginMode}
           sitekey={sitekey}
+          googleClientId={googleClientId}
           onClose={() => setLoginOpen(false)}
           onSuccess={onLoggedIn}
         />
@@ -402,12 +406,14 @@ function LoginModal({
   forced,
   initialMode,
   sitekey,
+  googleClientId,
   onClose,
   onSuccess,
 }: {
   forced: boolean;
   initialMode: "login" | "register";
   sitekey: string | null;
+  googleClientId: string | null;
   onClose: () => void;
   onSuccess: () => void;
 }) {
@@ -486,9 +492,30 @@ function LoginModal({
         <button className="btn" type="submit" disabled={busy}>
           {busy ? "…" : mode === "login" ? "Sign in" : "Create account"}
         </button>
-        <button className="btn google" type="button" disabled title="Configure a Google OAuth client to enable">
-          Continue with Google (coming soon)
-        </button>
+        {googleClientId && (
+          <>
+            <div className="or">or</div>
+            <GoogleSignIn
+              clientId={googleClientId}
+              onCredential={async (credential) => {
+                setError("");
+                setBusy(true);
+                try {
+                  await api.googleLogin(credential);
+                  onSuccess();
+                } catch (err) {
+                  setError(
+                    err instanceof ApiError && err.message
+                      ? err.message
+                      : "Google sign-in failed. Please try again."
+                  );
+                  setBusy(false);
+                }
+              }}
+              onError={setError}
+            />
+          </>
+        )}
         <p className="switch">
           {mode === "login" ? "New here? " : "Have an account? "}
           <button type="button" onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }}>

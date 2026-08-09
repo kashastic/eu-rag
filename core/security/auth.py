@@ -42,8 +42,11 @@ CREATE TABLE IF NOT EXISTS users (
     tenant       TEXT NOT NULL,
     created_at   DOUBLE PRECISION NOT NULL,
     byok_key_enc TEXT,
-    byok_set_at  DOUBLE PRECISION
+    byok_set_at  DOUBLE PRECISION,
+    google_sub   TEXT,
+    email        TEXT
 );
+CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users (google_sub);
 CREATE TABLE IF NOT EXISTS refresh_tokens (
     jti        TEXT PRIMARY KEY,
     username   TEXT NOT NULL,
@@ -113,13 +116,18 @@ class AuthStore:
         for ddl in (
             "ALTER TABLE users ADD COLUMN byok_key_enc TEXT",
             "ALTER TABLE users ADD COLUMN byok_set_at DOUBLE PRECISION",
+            "ALTER TABLE users ADD COLUMN google_sub TEXT",
+            "ALTER TABLE users ADD COLUMN email TEXT",
+            # NULLs don't collide in a unique index on either backend, so
+            # password-only accounts are unaffected
+            "CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users (google_sub)",
         ):
             try:
                 db.execute(ddl)
                 if not db.is_pg:
                     db._conn.commit()
             except Exception:
-                pass  # column already present
+                pass  # already present
 
     # --- users ---------------------------------------------------------------
 
@@ -154,6 +162,12 @@ class AuthStore:
         row = self._db.query_one(
             "SELECT * FROM users WHERE username = ?", (username.strip().lower(),)
         )
+        # A Google account stores an empty pw_hash — there is no password to
+        # get right, so password login must be refused outright rather than
+        # compared against a value no input can produce.
+        if row is not None and not row["pw_hash"]:
+            self.audit(username, "auth.login_failed", detail="password login on a google account")
+            raise AuthError("invalid credentials")
         if row is None or not hmac.compare_digest(
             _hash_password(password, bytes.fromhex(row["salt"])),
             bytes.fromhex(row["pw_hash"]),
@@ -162,6 +176,82 @@ class AuthStore:
             raise AuthError("invalid credentials")
         self.audit(username, "auth.login")
         return Principal(row["username"], row["role"], row["tenant"])
+
+    # --- Google sign-in ------------------------------------------------------
+
+    def upsert_google_user(
+        self, google_sub: str, email: str, name: str | None = None
+    ) -> Principal:
+        """Find or create the account for a verified Google identity.
+
+        Keyed on `google_sub` and **only** on `google_sub`. It is deliberately
+        impossible to reach an existing account this way: a Google login never
+        matches on username or email, and a derived username that is already
+        taken is skipped rather than reused. Otherwise anyone could register the
+        username `alice` (or an account with alice's address) and wait for the
+        real alice to sign in with Google — account takeover by land-grab.
+        Linking a Google identity to a password account would need proof of
+        ownership of that account, and existing accounts have no email to prove
+        it with, so the two are simply separate.
+        """
+        row = self._db.query_one(
+            "SELECT * FROM users WHERE google_sub = ?", (google_sub,)
+        )
+        if row is not None:
+            if email and email != row["email"]:
+                with self._db.transaction() as tx:  # keep the shown address fresh
+                    tx.execute(
+                        "UPDATE users SET email = ? WHERE username = ?",
+                        (email, row["username"]),
+                    )
+            self.audit(row["username"], "auth.google_login")
+            return Principal(row["username"], row["role"], row["tenant"])
+
+        username = self._free_username(email, name)
+        first_user = not self._db.query_one("SELECT 1 AS x FROM users LIMIT 1")
+        role = "admin" if first_user else "user"
+        with self._db.transaction() as tx:
+            tx.execute(
+                "INSERT INTO users"
+                " (username, salt, pw_hash, role, tenant, created_at, google_sub, email)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    username,
+                    os.urandom(16).hex(),
+                    "",  # no password — see the guard in authenticate()
+                    role,
+                    username,
+                    time.time(),
+                    google_sub,
+                    email or None,
+                ),
+            )
+        self.audit(username, "auth.google_register", detail=role)
+        return Principal(username, role, username)
+
+    def _free_username(self, email: str, name: str | None) -> str:
+        """A username derived from the Google profile that satisfies the same
+        rule as registration (3-40 chars, letters/digits/underscore) and is not
+        already taken."""
+        raw = (email.split("@")[0] if email else "") or (name or "") or "user"
+        # ASCII only: str.isalnum() is true for "ë" and every other unicode
+        # letter, and a username derived from a display name ends up in a tenant
+        # id and a URL. Keep it boring.
+        base = "".join(
+            c
+            for c in raw.lower().replace(" ", "_")
+            if c.isascii() and (c.isalnum() or c == "_")
+        )
+        base = (base or "user")[:36]
+        while len(base) < 3:
+            base += "0"
+        for suffix in ("", *(str(n) for n in range(2, 10000))):
+            candidate = base + suffix
+            if not self._db.query_one(
+                "SELECT 1 AS x FROM users WHERE username = ?", (candidate,)
+            ):
+                return candidate
+        raise AuthError("could not derive a free username")  # pragma: no cover
 
     # --- tokens --------------------------------------------------------------
 

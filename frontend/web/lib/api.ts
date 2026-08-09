@@ -161,6 +161,16 @@ export const api = {
     );
     setTokens(data.access_token, data.refresh_token);
   },
+  /** Exchange a Google ID token for our own session. The token is verified
+   *  server-side (signature, audience, issuer, verified email) — the browser
+   *  is only a courier. */
+  async googleLogin(credential: string) {
+    const data = await request<{ access_token: string; refresh_token: string }>(
+      "/auth/google",
+      { method: "POST", body: JSON.stringify({ credential }) }
+    );
+    setTokens(data.access_token, data.refresh_token);
+  },
   async me() {
     return request<{ username: string; role: string; auth_enabled: boolean }>("/auth/me");
   },
@@ -199,6 +209,7 @@ export const api = {
       auth_enabled: boolean;
       llm: string;
       turnstile_sitekey?: string | null;
+      google_client_id?: string | null;
     }>("/healthz");
   },
   async listChats() {

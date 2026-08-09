@@ -2,6 +2,43 @@
 
 Running log of build sessions. Newest first.
 
+## 2026-08-09 (auth) — Google sign-in, and no client secret to hold
+
+The "Continue with Google (coming soon)" button had been disabled since M5.
+Implemented with the **ID-token flow** (Google Identity Services), not the
+authorization-code flow: EURAG only wants an identity, so the code flow would
+have added a client secret, a callback route and cross-replica `state`/PKCE
+storage for nothing. **Zero new dependencies** — PyJWT 2.13 ships `PyJWKClient`
+and `cryptography` was already in.
+
+New: `core/security/google_oauth.py` (verification), `AuthStore.upsert_google_user`,
+`POST /auth/google`, `EURAG_GOOGLE_CLIENT_ID` served to the frontend through
+`/healthz`, and `components/GoogleSignIn.tsx`.
+
+**17 new tests, all offline** — a locally generated RSA key stands in for
+Google's and the JWKS fetch is monkeypatched through the `_signing_key` seam
+(same seam pattern as `turnstile._post`). They cover the checks that actually
+carry the security: wrong `aud` (a valid Google token for another app), a
+forged signature, `alg=none`, expiry, wrong issuer, and unverified email.
+
+**The bug that would have mattered.** A Google login must never reach an
+existing account — register `alice` with a password, wait for the real
+alice@example.com to sign in, and she'd inherit the squatter's chats and stored
+API key. `upsert_google_user` keys on `google_sub` alone and skips taken
+usernames (`alice` → `alice2`); there's a test named after the attack. Google
+accounts store an empty `pw_hash` and password login is refused outright.
+
+One thing the tests caught that review wouldn't have: `str.isalnum()` is `True`
+for `ë`, so a display name like "Zoë Q" produced the username `zoë_q`. Derived
+usernames are now ASCII-only — they become tenant ids and appear in URLs.
+
+Verified in Chrome: Google's own button renders in the login modal (44px, its
+own iframe, localized by Google), the old disabled button is gone, and
+`/auth/google` rejects a junk credential with `401 invalid Google credential`.
+**A real end-to-end sign-in is not verifiable here** — it needs a real client id
+whose authorized origin matches the site, which is the checklist handed to the
+operator. Tests **260 passed / 6 skipped** (+17); `next build` clean.
+
 ## 2026-08-09 (tiers) — the logged-in free tier gets a lifetime allowance
 
 The free tier was unbounded: cheap model, no escalation, but **unlimited**

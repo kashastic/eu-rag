@@ -79,6 +79,8 @@ services:
       # lifetime free questions per logged-in account, then BYOK is required
       EURAG_FREE_USER_QUESTIONS: ${EURAG_FREE_USER_QUESTIONS:-10}
       # bot gate on the anon funnel + registration; empty = off (see .env.example)
+      # Google Sign-In: public client id, no secret (ID-token flow)
+      EURAG_GOOGLE_CLIENT_ID: ${EURAG_GOOGLE_CLIENT_ID:-}
       EURAG_TURNSTILE_SITEKEY: ${EURAG_TURNSTILE_SITEKEY:-}
       EURAG_TURNSTILE_SECRET: ${EURAG_TURNSTILE_SECRET:-}
     volumes:

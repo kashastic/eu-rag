@@ -146,6 +146,9 @@ def healthz():
         "encryption": pipeline.registry._cipher is not None,
         # the web app reads the sitekey at runtime (rotate via env, no rebuild)
         "turnstile_sitekey": app.state.settings.turnstile_sitekey,
+        # public identifier, served at runtime so enabling Google
+        # sign-in is an env change and not a frontend rebuild
+        "google_client_id": app.state.settings.google_client_id,
     }
 
 

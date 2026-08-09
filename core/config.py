@@ -147,6 +147,14 @@ class Settings:
     free_user_questions: int = field(
         default_factory=lambda: int(os.environ.get("EURAG_FREE_USER_QUESTIONS", "10"))
     )
+    # Google Sign-In. Only the client id is needed: we verify the ID token the
+    # browser gets from Google (see core/security/google_oauth.py) rather than
+    # running the authorization-code flow, so there is NO client secret to hold.
+    # The id is public by design — it ships to every browser. Unset = the web
+    # app hides the Google button and /auth/google returns 503.
+    google_client_id: str | None = field(
+        default_factory=lambda: os.environ.get("EURAG_GOOGLE_CLIENT_ID") or None
+    )
     # Cloudflare Turnstile at the anonymous boundary (bot protection for the
     # free-question funnel and registration). Secret unset = check off (local
     # default); sitekey unset = the web app renders no widget. Served to the

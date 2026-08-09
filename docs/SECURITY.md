@@ -76,6 +76,27 @@ per address. Turnstile raises the cost of *automating* that; it does not
 eliminate it. Set `EURAG_FREE_ANON_QUESTIONS=0` for a BYOK-only deployment
 where the server's key is never spent on strangers.
 
+### Google Sign-In: what is actually checked
+
+The ID-token flow means the browser hands us a JWT and the server decides
+whether to believe it, so `core/security/google_oauth.verify_id_token` **is** the
+authentication boundary. It pins RS256 (never the token's own `alg`), verifies
+the signature against Google's JWKS, requires `iss` to be Google, enforces
+`exp`/`iat`, requires `email_verified`, and requires **`aud` to equal our own
+client id** — without that last check any correctly-signed Google token, minted
+for any app, would be a login here. It fails **closed** on an unreachable JWKS
+(unlike Turnstile, which fails open — that one is bounded by the per-IP quota;
+this one mints a session).
+
+There is no client secret to leak: `EURAG_GOOGLE_CLIENT_ID` is public by design.
+
+**Identity is keyed on `google_sub` only.** Never username, never email. Matching
+on either would let someone register a username (or an account with a known
+address) and inherit the real owner's account — chats and stored API key
+included — the first time they sign in with Google. A derived username that is
+taken is skipped instead. Google accounts carry an empty `pw_hash` and
+`authenticate()` refuses password login on them outright.
+
 ### BYOK: what encrypting the user's key does and does not protect against
 
 Users are asked to hand over an Anthropic API key, so be precise about the

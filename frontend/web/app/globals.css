@@ -225,11 +225,15 @@ a { color: var(--navy); }
 }
 .auth-card.modal { max-width: 420px; animation: pop .18s ease both; }
 @keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
-.btn.google {
-  background: var(--card); color: var(--ink-soft); border: 1px solid var(--rule-strong);
-  margin-top: 10px;
+/* Google renders its own button into .google-btn — its styling is fixed by
+   Google's brand rules, so we only place it. */
+.google-btn { display: flex; justify-content: center; margin-top: 4px; min-height: 44px; }
+.or {
+  display: flex; align-items: center; gap: 10px; margin: 16px 0 12px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--muted);
 }
-.btn.google:disabled { opacity: .55; }
+.or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
 
 @media (prefers-reduced-motion: reduce) { .auth-card.modal { animation: none; } }
 @media (max-width: 720px) {

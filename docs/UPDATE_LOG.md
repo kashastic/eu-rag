@@ -20,6 +20,56 @@ them. Don't paste the same paragraph into three files — link.
 
 ---
 
+## 2026-08-09 (Google Sign-In)
+
+### [DECISION] Google sign-in uses the ID-token flow, so there is no client secret
+
+**Choice.** Google Identity Services hands the browser a signed ID token; the
+browser POSTs it to `/auth/google`; `core/security/google_oauth.verify_id_token`
+verifies it and the server mints its own JWT pair. **Not** the
+authorization-code flow.
+
+**Why.** EURAG wants an *identity* and never calls a Google API on the user's
+behalf, so the code flow buys nothing and costs: a client secret to keep out of
+the repo and rotate, a `/auth/google/callback` route, and server-side `state`
+/PKCE storage that has to work across replicas. The ID-token flow needs only
+the **client id, which is public by design** — it ships to every browser, so
+`EURAG_GOOGLE_CLIENT_ID` is the one config value here that is deliberately not
+a secret. It reaches the frontend at runtime via `/healthz`, the same pattern as
+`turnstile_sitekey`, so enabling Google sign-in is an env change and not a
+frontend rebuild.
+
+**What makes it safe is the verification, so it is strict**: RS256 only (never
+the token's own `alg`), signature against Google's JWKS, `iss` must be Google,
+`exp`/`iat` enforced, `email_verified` must be true — and **`aud` must equal our
+client id**. That last one is the load-bearing check: a token minted for someone
+else's app is a genuine, correctly-signed Google token and still must not be a
+login here. There is a test for each of these, including `alg=none` and a token
+signed by a different key.
+
+Unlike the Turnstile check, this one **fails closed on an unreachable JWKS** —
+Turnstile fails open because the per-IP quota still bounds abuse, but this route
+mints a session, and there is no safe way to wave that through.
+
+### [GOTCHA] A Google login must never be able to land on an existing account
+
+**The attack.** Register the username `alice` with a password, then wait for the
+real alice@example.com to sign in with Google. If the Google path matched an
+account by username — or by email — she would be handed the squatter's account,
+along with their saved chats and stored API key. Account takeover by land-grab.
+
+**The rule.** `upsert_google_user` keys on `google_sub` and **only** on
+`google_sub` (stable and never reused by Google, unlike an email address, which
+can change hands). A derived username that is already taken is *skipped*, not
+reused — `alice` → `alice2`. There is a test named for this attack; don't
+"simplify" it away.
+
+Linking a Google identity to an existing password account would need proof of
+ownership of that account, and existing accounts have no email to prove it with,
+so the two identities are simply separate. A Google account stores an **empty
+`pw_hash`** and `authenticate()` refuses it outright rather than comparing
+against a value no input could produce.
+
 ## 2026-08-09 (tiers)
 
 ### [DECISION] The logged-in free tier is 10 questions for the life of the account, not per day

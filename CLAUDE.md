@@ -31,7 +31,7 @@ numbers is [`docs/DEVLOG.md`](docs/DEVLOG.md); dated decisions and gotchas —
 # env (Python 3.11+; venv already exists at .venv)
 source .venv/bin/activate
 
-# tests — 237 pass / 6 skip, fully offline (hash embedder, no API key needed)
+# tests — 260 pass / 6 skip, fully offline (hash embedder, no API key needed)
 .venv/bin/python -m pytest -q
 EURAG_LIVE_TESTS=1 pytest tests/test_hardening.py -q        # opt-in live LLM test
 EURAG_TEST_DATABASE_URL=postgresql://… pytest tests/test_postgres.py   # opt-in PG parity
@@ -61,7 +61,7 @@ cd frontend/web && npm install && npm run build   # or: npm run dev
 | `core/ingestion/` | loader (`html_to_text`, provenance), article-aware `chunker`, `embedder` |
 | `core/retrieval/` | `bm25`, `vector_store` (Qdrant), `hybrid_retriever` (RRF + rerank + tenant scope), `reranker`, `expansion` (contextualise + HyDE) |
 | `core/generation/` | `answerer` (cite-or-fail + insufficiency marker), `citations`, `llm_client` |
-| `core/security/` | `auth` (JWT, RBAC, audit), `crypto` (AES-256-GCM), `pii` (upload gate) |
+| `core/security/` | `auth` (JWT, RBAC, audit), `google_oauth` (ID-token verify), `crypto` (AES-256-GCM), `pii` (upload gate) |
 | `core/` | `pipeline` (wires it together), `registry` (SQLite, tenant+cipher), `db` (SQLite/Postgres), `conversations`, `quota`, `config` |
 | `api/` | `main`, `deps` (auth/tenant/tier), `routes/*`, `middleware/` (ratelimit, headers) |
 | `data/` | `scrapers/` (eurlex, portals, funding_calls, common), `samples/`, `seed.py` |
@@ -217,6 +217,13 @@ Full reasoning, symptoms, and the decisions behind them:
   fabricated markers, long uncited bodies, and uncited answers with no marker.
   Don't "tighten" this back to always-require-a-citation — that rejected the
   model for obeying its own prompt and cost 4 LLM calls per refusal.
+- **Google sign-in is the ID-token flow — there is no client secret.**
+  `EURAG_GOOGLE_CLIENT_ID` is *public* (it ships to every browser); don't treat
+  it as a secret or "hide" it in a way that breaks the runtime `/healthz`
+  handoff. The security is entirely in `google_oauth.verify_id_token`, and the
+  `aud` check is the load-bearing one. A Google login keys on `google_sub`
+  **only** — never username or email, or registering someone's username becomes
+  account takeover (`docs/UPDATE_LOG.md`).
 - **There are TWO logged-in ask paths** — `/query` with a bearer token and
   `POST /conversations/{id}/messages` (what the web app uses for saved chats).
   Any per-user gate must go through `api/deps.spend_free_question` or it is
