@@ -400,8 +400,26 @@ function LoginModal({
   const tsRef = useRef<TurnstileHandle>(null);
   const [challenging, setChallenging] = useState(false);
 
+  // The same bounds the API enforces (api/routes/auth.Credentials). Checked here
+  // so a short password is answered instantly instead of costing a round trip
+  // that comes back as a pydantic validation error.
+  function invalid(): string | null {
+    const name = username.trim();
+    if (name.length < 3 || name.length > 40) return "Username must be 3–40 characters.";
+    if (mode === "register" && !/^[a-zA-Z0-9_]+$/.test(name)) {
+      return "Username can use letters, digits and underscores only.";
+    }
+    if (password.length < 10) return "Password must be at least 10 characters.";
+    return null;
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    const problem = invalid();
+    if (problem) {
+      setError(problem);
+      return;
+    }
     setError("");
     setBusy(true);
     try {
@@ -412,11 +430,12 @@ function LoginModal({
       await api.login(username, password);
       onSuccess();
     } catch (err) {
-      setError(
+      const message =
         err instanceof ApiError || err instanceof TurnstileUnavailableError
           ? err.message
-          : "Something went wrong"
-      );
+          : "";
+      // never leave the button looking dead: an empty message renders nothing
+      setError(message || "Something went wrong. Please try again.");
       setBusy(false);
     }
   }
@@ -559,7 +578,14 @@ function Message({ msg }: { msg: ChatMessage }) {
         {(msg.meta.escalated || msg.meta.insufficient || msg.meta.mode) && (
           <div className="flags">
             {msg.meta.mode && <span className="flag">mode: {msg.meta.mode}</span>}
-            {msg.meta.escalated && <span className="flag escalated">★ escalated</span>}
+            {msg.meta.escalated && (
+              <span
+                className="flag escalated"
+                title="The first answer didn't hold up, so a stronger model re-answered it over a deeper search of the corpus."
+              >
+                ★ stronger model consulted
+              </span>
+            )}
             {msg.meta.insufficient && <span className="flag insufficient">sources incomplete</span>}
           </div>
         )}

@@ -22,6 +22,39 @@ them. Don't paste the same paragraph into three files — link.
 
 ## 2026-08-09 (web UI)
 
+### [GOTCHA] FastAPI's `detail` has three shapes, and the one we didn't parse made every 422 silent
+
+**Symptom.** Reported from the live site: *"nothing happens when I click Create
+account or Sign in."* The button un-greyed and no error appeared. The password
+was 9 characters against a 10-character minimum.
+
+**Why.** `lib/api.ts` parsed the error body as either a plain string or one of
+our structured `{code, message}` objects:
+
+```js
+const message = d && typeof d === "object" ? d.message : d || `HTTP ${status}`;
+```
+
+FastAPI returns **request-validation** failures as an *array* of pydantic
+errors. `typeof [] === "object"`, so the array took the object branch and
+`d.message` was `undefined` → `new ApiError(422, undefined)` → `err.message` is
+`""` → `{error && <p className="err">{error}</p>}` rendered **nothing**, because
+the empty string is falsy. Not just the password: every field-level 422 in the
+app was invisible the same way (username length/charset, a 2-character
+question).
+
+**Fix.** `errorFrom()` handles all three dialects and is contractually unable to
+return an empty message. Both call sites also fall back to a non-empty string,
+and the login form now checks the API's own bounds client-side so a short
+password is answered instantly instead of costing a round trip.
+
+**The general rule.** An error path that renders `{msg && …}` needs a
+**guaranteed non-empty** message — otherwise a parser miss doesn't show a wrong
+error, it shows *no* error, which the user reads as a dead button. Test the
+failure shapes, not just the happy path: this was reachable from the very first
+form on the site, and the whole flow had been verified end to end with *valid*
+input.
+
 ### [DECISION] Turnstile is invisible and runs at submit time, never on page load
 
 **Choice.** `components/Turnstile.tsx` renders with `appearance:

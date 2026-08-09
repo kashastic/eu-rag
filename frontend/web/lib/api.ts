@@ -91,12 +91,7 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
     return request<T>(path, init, false);
   }
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    const d = body.detail;
-    // detail may be a string or a structured object ({code, message})
-    const code = d && typeof d === "object" ? d.code : undefined;
-    const message = d && typeof d === "object" ? d.message : d || `HTTP ${res.status}`;
-    throw new ApiError(res.status, message, code);
+    throw errorFrom(res.status, await res.json().catch(() => ({})));
   }
   return res.json();
 }
@@ -105,6 +100,39 @@ export class ApiError extends Error {
   constructor(public status: number, message: string, public code?: string) {
     super(message);
   }
+}
+
+/** FastAPI speaks three dialects of `detail` and the UI has to survive all of
+ *  them: a plain string (`raise HTTPException(detail="…")`), one of our
+ *  structured `{code, message}` objects, and — for *request validation*
+ *  failures — an **array** of pydantic errors. That array used to fall into the
+ *  object branch and yield `undefined`, so e.g. a 9-character password threw an
+ *  ApiError with an empty message, `{error && …}` rendered nothing, and the
+ *  button looked dead. Every 422 was silent. Always return a non-empty message. */
+function errorFrom(status: number, body: unknown): ApiError {
+  const detail = (body as { detail?: unknown } | null)?.detail;
+  const fallback = `Request failed (HTTP ${status})`;
+
+  if (typeof detail === "string") return new ApiError(status, detail || fallback);
+
+  if (Array.isArray(detail)) {
+    const message = detail
+      .map((e) => {
+        const loc = Array.isArray(e?.loc) ? e.loc[e.loc.length - 1] : undefined;
+        const field = typeof loc === "string" && loc !== "body" ? `${loc}: ` : "";
+        return e?.msg ? field + e.msg : "";
+      })
+      .filter(Boolean)
+      .join("; ");
+    return new ApiError(status, message || fallback);
+  }
+
+  if (detail && typeof detail === "object") {
+    const { code, message } = detail as { code?: string; message?: string };
+    return new ApiError(status, message || fallback, code);
+  }
+
+  return new ApiError(status, fallback);
 }
 
 export const api = {

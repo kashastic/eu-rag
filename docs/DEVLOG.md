@@ -2,6 +2,40 @@
 
 Running log of build sessions. Newest first.
 
+## 2026-08-09 (web UI, follow-up) — every 422 was rendering as nothing
+
+Found by using the deployed site: *"nothing happens when I click Create
+account."* A 9-character password against a 10-character minimum. Reproduced
+against the API in one call —
+
+```
+$ curl -X POST /auth/register -d '{"username":"akapqr","password":"12345678"}'
+{"detail":[{"type":"string_too_short","loc":["body","password"], … }]}   HTTP 422
+```
+
+— `detail` is an **array**, `typeof [] === "object"`, so the client's parser
+took the object branch, `d.message` was `undefined`, and `{error && …}` rendered
+nothing at all. Every field-level validation error in the app was silent, not
+just this one.
+
+`errorFrom()` in `lib/api.ts` now handles string / `{code,message}` / pydantic
+array and cannot return an empty message; both call sites fall back to a
+non-empty string; and the login form checks the API's own bounds client-side.
+Verified in Chrome, four failure modes that all previously showed nothing:
+
+| input | before | after |
+|---|---|---|
+| 8-char password | *(nothing)* | "Password must be at least 10 characters." (client-side, no round trip) |
+| 2-char question (array 422) | *(nothing)* | "question: String should have at least 3 characters" |
+| duplicate username (string 422) | *(nothing)* | "username already taken" |
+| wrong password (401) | *(nothing)* | "invalid credentials" |
+
+Also renamed the answer badge `★ escalated` → **`★ stronger model consulted`**
+(with a tooltip) — "escalated" is our word for it, not the reader's. Confirmed
+on a live escalating question (the Late Payment statutory-interest one). The
+static local UI already said "escalated to stronger model"; the web app was the
+odd one out.
+
 ## 2026-08-09 (web UI) — the bot gate stops being the front door
 
 Two complaints, one root cause: the Turnstile widget was rendered eagerly and
