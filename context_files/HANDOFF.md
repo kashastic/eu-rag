@@ -2,25 +2,23 @@
 
 **As of:** 2026-08-10 · **EURAG is LIVE** at <https://eurag.duckdns.org> ·
 prod runs `7392001`; `main` is ahead by the docs commit and the privacy batch ·
-**272 tests pass, 7 skipped** locally.
+**277 tests pass, 7 skipped** locally.
 
-> **Uncommitted and not deployed:** the privacy/terms/erasure work below is in
-> the working tree only, and **`CONTACT_EMAIL` in
-> `frontend/web/lib/legal.ts` is still `privacy@example.invalid`**. Set it to a
-> real address before deploying — a published privacy notice with a dead
-> contact is worse than none.
+> **Committed but not pushed and not deployed:** the privacy/terms/erasure work
+> below is on local `main` only. It is complete — `CONTACT_EMAIL` is set to a
+> real mailbox — so the next step is `git push`, then `git pull` on the VM.
 
 Read [`CLAUDE.md`](../CLAUDE.md) first for standing rules — it wins on *how to
 work here*; this file wins on *what is true right now*. Build history with
 measurements: [`docs/DEVLOG.md`](../docs/DEVLOG.md). Why things are the way
 they are: [`docs/UPDATE_LOG.md`](../docs/UPDATE_LOG.md).
 
-**The working tree is clean and everything is deployed.** Start by confirming
-that, not by looking for pending work:
+**The working tree is clean; local `main` is ahead of what prod runs.** Start by
+confirming that, not by looking for pending work:
 
 ```bash
-git status --short && git log --oneline -1     # expect: clean, 7392001
-.venv/bin/python -m pytest -q                  # expect: 262 passed, 7 skipped
+git status --short && git log --oneline -1     # expect: clean, f9af78e
+.venv/bin/python -m pytest -q                  # expect: 277 passed, 7 skipped
 curl -s https://eurag.duckdns.org/healthz | python3 -m json.tool
 ```
 
@@ -202,8 +200,11 @@ this later — `docs/UPDATE_LOG.md`). The actual gap was transparency.
 - **`public` and `deleted_account` are reserved usernames** — a username is a
   tenant id and an audit actor, not a label.
 
-**Before this goes live:** set `CONTACT_EMAIL` (open item 6). That is the only
-blocker.
+- **Contact route** is `akashacharya.de@gmail.com` (`lib/legal.ts`), published
+  on both pages. It is a legal document's contact address — if it ever stops
+  being read, the notice stops being true.
+
+**Nothing blocks deploying this.**
 
 ## Open work, in priority order
 
@@ -247,9 +248,6 @@ blocker.
 5. **90-day credit cliff** — trial started 2026-08-08, so **~2026-11-06**.
    Landing spot is Hetzner `CAX21` (~€7/mo, ARM — the original images were built
    arm64). `docs/DEPLOY.md` §6.
-6. **Set `CONTACT_EMAIL`** in `frontend/web/lib/legal.ts` — currently
-   `privacy@example.invalid`. Use an address that can absorb spam. This is the
-   only thing blocking the privacy batch from deploying.
 
 **Deferred:** password accounts have no email → **no password reset** (lose the
 password, lose the saved chats). This is now *narrower* than it was — Google

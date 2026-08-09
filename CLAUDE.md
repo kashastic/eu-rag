@@ -323,8 +323,9 @@ Standing gaps, in rough priority order:
    re-measured on the Linux host.
 5. **The 90-day credit cliff** (trial started 2026-08-08) — `docs/DEPLOY.md` §6.
 
-6. **`CONTACT_EMAIL` in `frontend/web/lib/legal.ts` is a placeholder** — the
-   privacy notice has no working contact route until it is a real address.
+6. **`/privacy` and `/terms` publish a real contact address** — changing
+   `CONTACT_EMAIL` in `frontend/web/lib/legal.ts`, or letting that mailbox go
+   unread, changes what a published legal document promises.
 
 **Fonts are self-hosted** (`frontend/web/app/fonts.css` + `public/fonts/`) —
 generated, not hand-written; the header comment says how to refresh them. Do

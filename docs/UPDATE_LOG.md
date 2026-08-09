@@ -64,8 +64,11 @@ constants in `lib/legal.ts`) now state all of it, linked from the composer's
 disclaimer line so anonymous visitors reach them too. The pages are written to
 be **checkable** — every claim maps to something in the code.
 
-**`CONTACT_EMAIL` in `lib/legal.ts` is a placeholder** (`@example.invalid`) and
-must be set to a real, spam-tolerant address before it means anything.
+**`CONTACT_EMAIL` (`lib/legal.ts`) is a dedicated mailbox**, not the operator's
+personal address and not a plus-alias — a `+tag` strips back to the real inbox,
+so it publishes the personal address either way. A dedicated box also survives
+EURAG getting a company or a custom domain. It is a published legal document's
+contact route: if it stops being read, the notice stops being true.
 
 ### [DECISION] The web fonts are self-hosted, and must stay that way
 

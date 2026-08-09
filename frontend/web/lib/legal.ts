@@ -8,11 +8,9 @@
 // the real inbox, so it publishes the personal address either way. A dedicated
 // box also survives EURAG getting a company or a custom domain.
 //
-// The value below is deliberately an unroutable placeholder: a privacy notice
-// with a dead contact route is worse than no notice, and a *plausible-looking*
-// wrong address would ship silently. `.invalid` cannot resolve, so it fails
-// loudly. **Set this before deploying the privacy pages.**
-export const CONTACT_EMAIL = "privacy@example.invalid"; // TODO: real mailbox
+// Changing this changes a published legal document — treat it like one, and
+// don't point it at an inbox nobody reads.
+export const CONTACT_EMAIL = "akashacharya.de@gmail.com";
 
 // Bump whenever either page changes in substance, not for typo fixes.
 export const LAST_UPDATED = "10 August 2026";
