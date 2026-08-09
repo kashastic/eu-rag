@@ -14,7 +14,7 @@ national funding agencies).
 **Milestones M1–M6 are complete** and tagged `v1.0.0`, the **"make it live
 safely" batch is complete** (all 8 phases), and **EURAG is LIVE** at
 <https://eurag.duckdns.org> — GCP `e2-medium`, 47 documents, real Turnstile
-keys, Let's Encrypt cert. Current state and open work:
+keys, Let's Encrypt cert, **Google sign-in enabled**. Current state and open work:
 [`context_files/HANDOFF.md`](context_files/HANDOFF.md); the batch's design
 decisions (D1–D17) are in
 [`context_files/PLAN_LIVE_SAFETY.md`](context_files/PLAN_LIVE_SAFETY.md).
@@ -31,7 +31,7 @@ numbers is [`docs/DEVLOG.md`](docs/DEVLOG.md); dated decisions and gotchas —
 # env (Python 3.11+; venv already exists at .venv)
 source .venv/bin/activate
 
-# tests — 260 pass / 6 skip, fully offline (hash embedder, no API key needed)
+# tests — 262 pass / 7 skip, fully offline (hash embedder, no API key needed)
 .venv/bin/python -m pytest -q
 EURAG_LIVE_TESTS=1 pytest tests/test_hardening.py -q        # opt-in live LLM test
 EURAG_TEST_DATABASE_URL=postgresql://… pytest tests/test_postgres.py   # opt-in PG parity
@@ -66,8 +66,8 @@ cd frontend/web && npm install && npm run build   # or: npm run dev
 | `api/` | `main`, `deps` (auth/tenant/tier), `routes/*`, `middleware/` (ratelimit, headers) |
 | `data/` | `scrapers/` (eurlex, portals, funding_calls, common), `samples/`, `seed.py` |
 | `frontend/static/` | zero-dep chat UI (local single-user mode) |
-| `frontend/web/` | Next.js app (accounts, saved chats, tiers) |
-| `tests/` | unit + integration; `test_security`, `test_tiers`, `test_postgres` |
+| `frontend/web/` | Next.js app (accounts, Google sign-in, saved chats, tiers) |
+| `tests/` | unit + integration; `test_security`, `test_tiers`, `test_google_signin`, `test_postgres` |
 
 ## How it works (the load-bearing bits)
 
@@ -96,6 +96,13 @@ cd frontend/web && npm install && npm run build   # or: npm run dev
 - **Tenancy**: every chunk has a tenant; `Registry.get_chunks(ids, tenants)` is
   the ONE hard gate. Official corpus = tenant `public`; each user gets a private
   tenant. Isolation is enforced in one place and adversarially tested.
+- **Sign-in**: username + password (scrypt) **or** Google. Google uses the
+  ID-token flow — no client secret, and `EURAG_GOOGLE_CLIENT_ID` is public and
+  reaches the frontend at runtime via `/healthz`; all the security is in
+  `google_oauth.verify_id_token` (the `aud` check especially). The two kinds of
+  account are **separate and cannot be linked**: Google identity keys on
+  `google_sub` only, and a Google account stores an empty `pw_hash` so password
+  login is refused on it outright.
 - **Access tiers** (cost control): anonymous → N free full-quality questions
   counted **server-side per IP/day** (`AnonQuota`) → login wall. Logged-in free
   tier = Haiku, no escalation, and `EURAG_FREE_USER_QUESTIONS` (10) questions
@@ -284,8 +291,10 @@ that file is the one to read at session start.
 
 Standing gaps, in rough priority order:
 
-1. **No billing alerts.** A public URL spends the server's Anthropic key on
-   anonymous full-quality answers. `docs/DEPLOY.md` §5.6.
+1. **No billing alerts.** The one genuinely unbounded risk. The logged-in free
+   tier is capped (`EURAG_FREE_USER_QUESTIONS`, 10 for the life of the account,
+   then BYOK) but **anonymous is not** — a public URL spends the server's key on
+   full-quality, escalation-enabled answers. `docs/DEPLOY.md` §5.6.
 2. **Escalation cost — count it before tuning it.** The `query outcome:`
    telemetry exists for this and has **not been read against real traffic yet**.
    The open lever on escalation *count* is that nothing thresholds relevance, so
@@ -297,5 +306,7 @@ Standing gaps, in rough priority order:
    re-measured on the Linux host.
 5. **The 90-day credit cliff** (trial started 2026-08-08) — `docs/DEPLOY.md` §6.
 
-Deferred: accounts have no email (so no password reset), Google OAuth
-disabled, registry-uploads-per-instance, no streaming, no i18n, no monitoring.
+Deferred: password accounts have no email, so **no password reset** (narrower
+than it was — Google sign-in gives new users a recovery-capable route — but it
+still bites anyone who registered with a username and password);
+registry-uploads-per-instance; no streaming; no i18n; no monitoring.
