@@ -35,9 +35,26 @@ usernames are now ASCII-only — they become tenant ids and appear in URLs.
 Verified in Chrome: Google's own button renders in the login modal (44px, its
 own iframe, localized by Google), the old disabled button is gone, and
 `/auth/google` rejects a junk credential with `401 invalid Google credential`.
-**A real end-to-end sign-in is not verifiable here** — it needs a real client id
-whose authorized origin matches the site, which is the checklist handed to the
-operator. Tests **260 passed / 6 skipped** (+17); `next build` clean.
+Tests **260 passed / 6 skipped** (+17); `next build` clean.
+
+**Probing the authorized origins without deploying.** Google's origin check is
+the one thing a local run can't exercise — until you serve a minimal GIS page
+*at* the origin under test with `context.route()` and watch whether
+`/gsi/button` comes back `200` or `403`. With the real client id:
+
+| origin | `/gsi/button` | verdict |
+|---|---|---|
+| `https://eurag.duckdns.org` | 200 | **authorized** |
+| `http://localhost:3000` | 403 | not listed (local dev sign-in won't work) |
+| a control origin we don't own | 403 | not listed — so the probe discriminates |
+
+The control row is the point: without it, a "200" proves nothing about whether
+the check is real. Worth reusing whenever an origin/redirect list changes.
+
+That probe also caught a bug of ours: React's dev double-mount let the discarded
+instance run `initialize()` and `renderButton()` after its await, which GSI
+warns about and which would render a second button into a detached container.
+`render()` now takes an `isLive()` check applied *after* the await.
 
 ## 2026-08-09 (tiers) — the logged-in free tier gets a lifetime allowance
 

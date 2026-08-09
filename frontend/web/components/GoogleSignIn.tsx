@@ -78,9 +78,14 @@ export function GoogleSignIn({
   const errorRef = useRef(onError);
   errorRef.current = onError;
 
-  const render = useCallback(async () => {
+  // `isLive` is checked *after* the await: without it the instance that React's
+  // dev double-mount already threw away still reaches initialize() and
+  // renderButton(), which GSI warns about ("called multiple times ... only the
+  // last initialized instance will be used") and which would render a second
+  // button into a detached container.
+  const render = useCallback(async (isLive: () => boolean) => {
     await loadScript();
-    if (!container.current || !window.google) return;
+    if (!isLive() || !container.current || !window.google) return;
     window.google.accounts.id.initialize({
       client_id: clientId,
       callback: (res: { credential?: string }) => {
@@ -104,7 +109,7 @@ export function GoogleSignIn({
 
   useEffect(() => {
     let disposed = false;
-    render().catch(() => {
+    render(() => !disposed).catch(() => {
       if (!disposed) setFailed(true);
     });
     return () => {
