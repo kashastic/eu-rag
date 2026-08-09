@@ -14,7 +14,8 @@ national funding agencies).
 **Milestones M1–M6 are complete** and tagged `v1.0.0`, the **"make it live
 safely" batch is complete** (all 8 phases), and **EURAG is LIVE** at
 <https://eurag.duckdns.org> — GCP `e2-medium`, 47 documents, real Turnstile
-keys, Let's Encrypt cert, **Google sign-in enabled**. Current state and open work:
+keys, Let's Encrypt cert, **Google sign-in enabled**, and a published
+**`/privacy` + `/terms`** with self-service account erasure. Current state and open work:
 [`context_files/HANDOFF.md`](context_files/HANDOFF.md); the batch's design
 decisions (D1–D17) are in
 [`context_files/PLAN_LIVE_SAFETY.md`](context_files/PLAN_LIVE_SAFETY.md).
@@ -31,7 +32,7 @@ numbers is [`docs/DEVLOG.md`](docs/DEVLOG.md); dated decisions and gotchas —
 # env (Python 3.11+; venv already exists at .venv)
 source .venv/bin/activate
 
-# tests — 262 pass / 7 skip, fully offline (hash embedder, no API key needed)
+# tests — 277 pass / 7 skip, fully offline (hash embedder, no API key needed)
 .venv/bin/python -m pytest -q
 EURAG_LIVE_TESTS=1 pytest tests/test_hardening.py -q        # opt-in live LLM test
 EURAG_TEST_DATABASE_URL=postgresql://… pytest tests/test_postgres.py   # opt-in PG parity
@@ -103,6 +104,12 @@ cd frontend/web && npm install && npm run build   # or: npm run dev
   account are **separate and cannot be linked**: Google identity keys on
   `google_sub` only, and a Google account stores an empty `pw_hash` so password
   login is refused on it outright.
+- **Erasure**: `DELETE /account` is the self-service one (account, refresh
+  tokens, chats, uploaded docs, BYOK key, lifetime quota row), gated on typing
+  the username back; admin has `DELETE /admin/tenants/{tenant}`. Content is
+  deleted **before** the user row, so a half-failure leaves a working account,
+  not an orphaned login. The audit trail survives with `actor` rewritten to
+  `deleted_account` — deleting an account must not erase evidence of an attack.
 - **Access tiers** (cost control): anonymous → N free full-quality questions
   counted **server-side per IP/day** (`AnonQuota`) → login wall. Logged-in free
   tier = Haiku, no escalation, and `EURAG_FREE_USER_QUESTIONS` (10) questions
@@ -267,6 +274,12 @@ Full reasoning, symptoms, and the decisions behind them:
   compliance product. Adding analytics is what would reopen this
   (`docs/UPDATE_LOG.md`, 2026-08-10). The real obligation was transparency, and
   it lives in `/privacy` + `/terms`.
+- **Never write "GDPR compliant" in the copy.** That is a conclusion about an
+  organisation, not a property of a codebase, and the org-side pieces are
+  missing (no legal entity named, no Art. 28 DPA with Anthropic, no lawyer
+  review). The claim the site *can* stand behind is the checkable one already
+  on `/privacy`: **no cookies, no tracking, no analytics** — verify it with the
+  two curl commands in HANDOFF before touching the frontend.
 - **A user's tenant IS their username**, and the audit log keys on it too — so
   a username is an identifier, not a label. `RESERVED_USERNAMES` (`public`,
   `deleted_account`) is refused by `register` **and** skipped by the

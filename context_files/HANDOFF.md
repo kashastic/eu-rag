@@ -1,25 +1,32 @@
 # HANDOFF — continue here
 
 **As of:** 2026-08-10 · **EURAG is LIVE** at <https://eurag.duckdns.org> ·
-prod runs `7392001`; `main` is ahead by the docs commit and the privacy batch ·
-**277 tests pass, 7 skipped** locally.
-
-> **Committed but not pushed and not deployed:** the privacy/terms/erasure work
-> below is on local `main` only. It is complete — `CONTACT_EMAIL` is set to a
-> real mailbox — so the next step is `git push`, then `git pull` on the VM.
+prod runs `15cbfc0`; `origin/main` is ahead only by this docs commit, which
+changes no code · **277 tests pass, 7 skipped** locally.
 
 Read [`CLAUDE.md`](../CLAUDE.md) first for standing rules — it wins on *how to
 work here*; this file wins on *what is true right now*. Build history with
 measurements: [`docs/DEVLOG.md`](../docs/DEVLOG.md). Why things are the way
 they are: [`docs/UPDATE_LOG.md`](../docs/UPDATE_LOG.md).
 
-**The working tree is clean; local `main` is ahead of what prod runs.** Start by
-confirming that, not by looking for pending work:
+**The working tree is clean and everything is deployed.** Start by confirming
+that, not by looking for pending work:
 
 ```bash
-git status --short && git log --oneline -1     # expect: clean, f9af78e
+git status --short && git log --oneline -1     # expect: clean, 15cbfc0
 .venv/bin/python -m pytest -q                  # expect: 277 passed, 7 skipped
 curl -s https://eurag.duckdns.org/healthz | python3 -m json.tool
+```
+
+**The privacy claims are checkable from here** — re-run these if you touch the
+frontend, because they are what `/privacy` promises in writing:
+
+```bash
+# must print NOTHING: no third-party host in the served HTML
+curl -s -L https://eurag.duckdns.org/chat | grep -oE "https://[a-z0-9.-]+\.(com|net)" | sort -u
+# fonts must come from our own origin (200 font/woff2)
+curl -s -o /dev/null -w "%{http_code} %{content_type}\n" \
+  https://eurag.duckdns.org/fonts/fraunces-italic-latin-ext.woff2
 ```
 
 ---
@@ -171,7 +178,11 @@ purpose (two SQLite, one Postgres).
 
 ---
 
-## What shipped 2026-08-10 (privacy batch, not yet deployed)
+## What shipped 2026-08-10 (privacy batch) — live
+
+Deployed and verified on prod: `/privacy` and `/terms` return 200, the served
+HTML contains **no third-party host at all**, and fonts serve from
+`eurag.duckdns.org` (`200 font/woff2`). Two commits, `f9af78e..15cbfc0`.
 
 Prompted by "why don't we ask for cookie consent?" — the audit answered it in
 reverse. EURAG sets **no cookies**, runs no analytics and carries no tracker,
@@ -204,7 +215,14 @@ this later — `docs/UPDATE_LOG.md`). The actual gap was transparency.
   on both pages. It is a legal document's contact address — if it ever stops
   being read, the notice stops being true.
 
-**Nothing blocks deploying this.**
+**What this does NOT make the site.** "GDPR compliant" is a conclusion about an
+organisation, not a property of a codebase, and it is **not claimed anywhere in
+the copy** — don't add it. Still missing and none of it is code: no legal entity
+named in the notice (Art. 13 wants the controller's identity), **no Art. 28 DPA
+with Anthropic** or documented transfer mechanism, no lawyer has read the notice
+against the real processing, and chat retention is "until you delete it" rather
+than a policy. The safe public phrasing is the one already on the page: *no
+cookies, no tracking, no analytics*, which is checkable.
 
 ## Open work, in priority order
 
