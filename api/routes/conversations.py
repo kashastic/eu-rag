@@ -4,7 +4,14 @@ their own conversations (ownership checked on every id)."""
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from api.deps import allowed_tenants, current_principal, paid_tier
+from api.deps import (
+    allowed_tenants,
+    current_principal,
+    paid_tier,
+    refund_free_question,
+    spend_free_question,
+)
+from core.generation.llm_client import LLMUnavailableError
 from core.security.auth import Principal, question_hash
 
 router = APIRouter(tags=["conversations"])
@@ -93,16 +100,25 @@ def ask(conv_id: str, body: Ask, request: Request, p: Principal = Depends(curren
 
     tenants = allowed_tenants(request, p)
     plan = paid_tier(request, p)
-    result = request.app.state.pipeline.query(
-        body.question,
-        industry=body.industry,
-        tenants=tenants,
-        answer_model=plan["answer_model"],
-        escalation_model=plan["escalation_model"],
-        api_key=plan["api_key"],
-        history=_history(conv),
-    ).to_dict()
+    # the free tier's lifetime allowance — same gate as /query, one helper, so
+    # the two logged-in ask paths can't drift apart
+    free_remaining = spend_free_question(request, p, plan)
+    try:
+        result = request.app.state.pipeline.query(
+            body.question,
+            industry=body.industry,
+            tenants=tenants,
+            answer_model=plan["answer_model"],
+            escalation_model=plan["escalation_model"],
+            api_key=plan["api_key"],
+            history=_history(conv),
+        ).to_dict()
+    except LLMUnavailableError:
+        refund_free_question(request, p, plan)
+        raise
     result["tier"] = plan["tier"]
+    if free_remaining is not None:
+        result["free_remaining"] = free_remaining
 
     store.add_message(conv_id, "user", body.question)
     store.add_message(

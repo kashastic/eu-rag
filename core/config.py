@@ -140,6 +140,13 @@ class Settings:
     free_model: str = field(
         default_factory=lambda: os.environ.get("EURAG_FREE_MODEL", "claude-haiku-4-5")
     )
+    # ...and only this many questions, counted server-side for the LIFETIME of
+    # the account (not per day — see core/quota.UserQuota). Spending it ends the
+    # free tier: the only way on is BYOK, so the server's key stops paying for a
+    # returning free user. 0 = BYOK required from the first question.
+    free_user_questions: int = field(
+        default_factory=lambda: int(os.environ.get("EURAG_FREE_USER_QUESTIONS", "10"))
+    )
     # Cloudflare Turnstile at the anonymous boundary (bot protection for the
     # free-question funnel and registration). Secret unset = check off (local
     # default); sitekey unset = the web app renders no widget. Served to the

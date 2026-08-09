@@ -2,6 +2,46 @@
 
 Running log of build sessions. Newest first.
 
+## 2026-08-09 (tiers) — the logged-in free tier gets a lifetime allowance
+
+The free tier was unbounded: cheap model, no escalation, but **unlimited**
+questions on the server's key. That is the last uncapped path to the owner's
+Anthropic bill, and it matters against the 90-day credit cliff.
+
+**Shipped:** `EURAG_FREE_USER_QUESTIONS` (default **10**), counted for the
+**lifetime of the account** — not per day. `core.quota.UserQuota` is deliberately
+*not* AnonQuota with a different key: no day column, so nothing resets and
+nothing is swept. Anonymous users get a recurring daily allowance because they
+have no account to attach history to; a logged-in user gets a one-time trial that
+ends in BYOK.
+
+**The bit that would have been the bug.** There are *two* logged-in ask paths —
+`/query` with a bearer token, and `POST /conversations/{id}/messages`, which is
+what the web app actually uses for saved chats. A gate on one is not a gate, so
+it lives in `deps.spend_free_question` and both routes call it. There's a test
+that spends via one door and asserts the other door counted it.
+
+**402, never 401.** The web client treats 401 as "refresh the session token", so
+a 401 wall would send it into a refresh loop instead of showing the dialog —
+the same trap already documented for `byok_key_rejected`. Refund on
+`LLMUnavailableError` mirrors the anonymous path.
+
+Verified in Chrome against a keyless backend (so the gate is exercised without
+spending LLM calls), `EURAG_FREE_USER_QUESTIONS=2`: banner counts `2 of 2` →
+`1 of 2` → "used all 2", the third question returns **402**, the key dialog
+opens by itself, and after storing a key the tier banner disappears and the
+counter is no longer consulted. Tests: **243 passed / 6 skipped** (+6).
+
+**Also — the BYOK honesty pass.** The dialog used to say "Stored encrypted;
+never shown again", which is true but reads as a stronger promise than the
+design makes. `EURAG_ENCRYPTION_KEY` sits on the same host as the database, so
+encryption-at-rest defends against a stolen dump, not against the operator; the
+key is decrypted into memory on every query; and an Anthropic key can't be
+scoped to one app. The dialog now says exactly that, tells the user to create a
+dedicated key with a spend limit, notes that removing it here does **not** revoke
+it upstream, and nudges a rotation past 30 days using a new `users.byok_set_at`
+column. Threat model: [SECURITY.md](SECURITY.md).
+
 ## 2026-08-09 (web UI, follow-up) — every 422 was rendering as nothing
 
 Found by using the deployed site: *"nothing happens when I click Create

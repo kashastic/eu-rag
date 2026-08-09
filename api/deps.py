@@ -99,6 +99,50 @@ def paid_tier(request: Request, principal: Principal) -> dict:
     }
 
 
+def spend_free_question(request: Request, principal: Principal, plan: dict) -> int | None:
+    """Take one from a free user's lifetime allowance, or refuse.
+
+    Returns the remaining count for the response, or None when no gate applies
+    (BYOK — billed to the user, so the server has no reason to count it — and
+    local auth-off mode). Raises **402** when the allowance is spent: never 401,
+    because the web client treats 401 as "refresh the session token" and would
+    loop instead of showing the wall (same trap as `byok_key_rejected`, see
+    docs/SECURITY.md).
+
+    Lives here rather than in a route because BOTH logged-in ask paths must
+    enforce it identically — `/query` with a token and
+    `/conversations/{id}/messages` — and a gate present on one of two doors is
+    not a gate.
+    """
+    if plan["tier"] != "free":
+        return None
+    quota = request.app.state.user_quota
+    if quota is None:
+        return None
+    limit = request.app.state.settings.free_user_questions
+    allowed, remaining = quota.consume(principal.username, limit)
+    if not allowed:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "free_limit_reached",
+                "message": (
+                    f"You've used your {limit} free questions. Add your own "
+                    "Anthropic API key in Settings to keep going — those "
+                    "answers are billed to you, and use the stronger models."
+                ),
+            },
+        )
+    return remaining
+
+
+def refund_free_question(request: Request, principal: Principal, plan: dict) -> None:
+    """Give back a question whose answer never arrived (see the anon path's
+    refund — same parallel-overrun safety, same reason)."""
+    if plan["tier"] == "free" and request.app.state.user_quota is not None:
+        request.app.state.user_quota.refund(principal.username)
+
+
 def require_admin(principal: Principal = Depends(current_principal)) -> Principal:
     if not principal.is_admin:
         raise HTTPException(status_code=403, detail="admin role required")

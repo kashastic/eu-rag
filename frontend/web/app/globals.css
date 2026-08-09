@@ -60,6 +60,12 @@ a { color: var(--navy); }
 .switch button { background: none; border: none; color: var(--navy); cursor: pointer; font: inherit; text-decoration: underline; }
 .err { color: var(--red-ink); font-size: 13px; margin: 8px 0 0; }
 .hint { color: var(--muted); font-size: 13px; font-style: italic; margin: 0 0 8px; text-align: center; }
+/* the key-handling disclosure: quiet, but readable — nobody should have to
+   squint at what happens to their API key */
+.fineprint { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--rule); }
+.fineprint p { margin: 0 0 8px; font-size: 12.5px; line-height: 1.55; color: var(--ink-soft); }
+.fineprint p:last-child { margin-bottom: 0; }
+.fineprint strong { color: var(--ink); }
 
 /* ---------- app shell ---------- */
 .shell { display: grid; grid-template-columns: 280px 1fr; height: 100vh; }

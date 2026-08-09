@@ -97,10 +97,13 @@ cd frontend/web && npm install && npm run build   # or: npm run dev
   the ONE hard gate. Official corpus = tenant `public`; each user gets a private
   tenant. Isolation is enforced in one place and adversarially tested.
 - **Access tiers** (cost control): anonymous → N free full-quality questions
-  counted **server-side per IP/day** (`core/quota.py`) → login wall. Logged-in
-  free tier = Haiku, no escalation. **BYOK** = user's own key (AES-256-GCM
-  encrypted) unlocks the full cascade on their bill. Local (auth-off) mode is
-  untiered. Tiering lives in `api/deps.paid_tier` + `pipeline.query` overrides.
+  counted **server-side per IP/day** (`AnonQuota`) → login wall. Logged-in free
+  tier = Haiku, no escalation, and `EURAG_FREE_USER_QUESTIONS` (10) questions
+  for the **lifetime of the account** (`UserQuota` — no day column, never
+  resets) → 402 `free_limit_reached`. **BYOK** = user's own key (AES-256-GCM
+  encrypted) unlocks the full cascade on their bill and skips the counter. Local
+  (auth-off) mode is untiered. Tiering lives in `api/deps.paid_tier` +
+  `pipeline.query` overrides; the free gate in `api/deps.spend_free_question`.
 
 ## Standing rules (follow these)
 
@@ -214,6 +217,16 @@ Full reasoning, symptoms, and the decisions behind them:
   fabricated markers, long uncited bodies, and uncited answers with no marker.
   Don't "tighten" this back to always-require-a-citation — that rejected the
   model for obeying its own prompt and cost 4 LLM calls per refusal.
+- **There are TWO logged-in ask paths** — `/query` with a bearer token and
+  `POST /conversations/{id}/messages` (what the web app uses for saved chats).
+  Any per-user gate must go through `api/deps.spend_free_question` or it is
+  bypassable by switching UI. And **a "logged in but not allowed" response is
+  402/403, never 401** — the web client treats 401 as "refresh the session
+  token" and loops.
+- **Never promise more about a user's stored API key than the design delivers.**
+  `EURAG_ENCRYPTION_KEY` is on the same host as the DB, so encryption at rest
+  stops a stolen dump, not the operator. The BYOK dialog says so on purpose —
+  weakening that copy is a security regression (`docs/SECURITY.md`).
 - **The Turnstile widget is invisible and runs at submit time**
   (`interaction-only` + `execution: "execute"`, one fresh single-use token per
   submit). **Never re-gate a button on it solving** — the old always-visible

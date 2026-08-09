@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core.db import Database
-from core.quota import AnonQuota
+from core.quota import AnonQuota, UserQuota
 
 
 # --- unit: the server-side quota (the real cost gate) ----------------------
@@ -186,3 +186,115 @@ def test_byok_set_status_and_unlock(client):
 # (per-IP independence of the allowance is asserted above, in the two
 # EURAG_TRUST_PROXY tests — X-Forwarded-For only identifies a client when the
 # deployment says the header is trustworthy.)
+
+
+# --- the logged-in free tier's LIFETIME allowance --------------------------
+
+def test_user_quota_consumes_then_blocks_and_never_resets(tmp_path):
+    q = UserQuota(Database(None, sqlite_path=tmp_path / "q.db"))
+    assert q.consume("alice", 3) == (True, 2)
+    assert q.consume("alice", 3) == (True, 1)
+    assert q.consume("alice", 3) == (True, 0)
+    assert q.consume("alice", 3) == (False, 0)
+    # no day column to roll over: a second instance on the same DB agrees
+    assert UserQuota(Database(None, sqlite_path=tmp_path / "q.db")).remaining("alice", 3) == 0
+    assert q.consume("bob", 3) == (True, 2)  # per user, not global
+
+
+def test_user_quota_refund_cannot_go_negative(tmp_path):
+    q = UserQuota(Database(None, sqlite_path=tmp_path / "q.db"))
+    q.refund("alice")  # nothing consumed yet
+    assert q.remaining("alice", 3) == 3
+    q.consume("alice", 3)
+    q.refund("alice")
+    q.refund("alice")  # second refund has nothing to give back
+    assert q.remaining("alice", 3) == 3
+
+
+@pytest.fixture()
+def free_client(settings, monkeypatch):
+    """Auth on, a two-question free allowance so the wall is cheap to reach."""
+    monkeypatch.setenv("EURAG_AUTH_ENABLED", "true")
+    monkeypatch.setenv("EURAG_JWT_SECRET", "test-secret-at-least-32-bytes-long!!")
+    monkeypatch.setenv("EURAG_FREE_ANON_QUESTIONS", "0")
+    monkeypatch.setenv("EURAG_FREE_USER_QUESTIONS", "2")
+    monkeypatch.setenv("EURAG_ENCRYPTION_KEY", os.urandom(32).hex())
+    from api.main import app
+
+    with TestClient(app) as c:
+        yield c
+
+
+def _account(client, name="carol"):
+    client.post("/auth/register", json={"username": name, "password": "longpassword1"})
+    return client.post(
+        "/auth/login", json={"username": name, "password": "longpassword1"}
+    ).json()["access_token"]
+
+
+def test_free_user_gets_the_allowance_then_402(free_client):
+    tok = _account(free_client)
+    for i in range(2):
+        r = free_client.post("/query", json={"question": "SME thresholds?"}, headers=_bearer(tok))
+        assert r.status_code == 200
+        assert r.json()["tier"] == "free"
+        assert r.json()["free_remaining"] == 1 - i
+    walled = free_client.post(
+        "/query", json={"question": "one more?"}, headers=_bearer(tok)
+    )
+    # 402, never 401 — the web client treats 401 as "refresh the token"
+    assert walled.status_code == 402
+    assert walled.json()["detail"]["code"] == "free_limit_reached"
+
+
+def test_the_saved_chat_route_shares_the_same_allowance(free_client):
+    """Two logged-in ask paths, one gate: spending via /query must leave the
+    conversation route with less, or the limit is bypassable by switching UI."""
+    tok = _account(free_client, "dave")
+    conv = free_client.post("/conversations", json={}, headers=_bearer(tok)).json()
+    r = free_client.post(
+        f"/conversations/{conv['id']}/messages",
+        json={"question": "SME thresholds?"}, headers=_bearer(tok),
+    )
+    assert r.status_code == 200 and r.json()["free_remaining"] == 1
+    free_client.post("/query", json={"question": "and again?"}, headers=_bearer(tok))
+    walled = free_client.post(
+        f"/conversations/{conv['id']}/messages",
+        json={"question": "third one"}, headers=_bearer(tok),
+    )
+    assert walled.status_code == 402
+    assert walled.json()["detail"]["code"] == "free_limit_reached"
+
+
+def test_byok_bypasses_the_allowance_and_does_not_spend_it(free_client):
+    tok = _account(free_client, "erin")
+    free_client.post("/query", json={"question": "SME thresholds?"}, headers=_bearer(tok))
+    free_client.put(
+        "/account/api-key",
+        json={"api_key": "sk-ant-test-key-000000000000000000"},
+        headers=_bearer(tok),
+    )
+    # BYOK is billed to the user, so the server stops counting entirely
+    for _ in range(4):
+        r = free_client.post("/query", json={"question": "SME thresholds?"}, headers=_bearer(tok))
+        assert r.status_code == 200 and r.json()["tier"] == "byok"
+        assert "free_remaining" not in r.json()
+    # removing the key returns the untouched remainder of the free allowance
+    free_client.delete("/account/api-key", headers=_bearer(tok))
+    acct = free_client.get("/account", headers=_bearer(tok)).json()
+    assert acct["tier"] == "free" and acct["free_remaining"] == 1
+
+
+def test_account_reports_the_allowance_and_key_age_but_never_the_key(free_client):
+    tok = _account(free_client, "frank")
+    acct = free_client.get("/account", headers=_bearer(tok)).json()
+    assert acct["free_limit"] == 2 and acct["free_remaining"] == 2
+    assert acct["api_key_set_at"] is None
+    free_client.put(
+        "/account/api-key",
+        json={"api_key": "sk-ant-test-key-000000000000000000"},
+        headers=_bearer(tok),
+    )
+    acct = free_client.get("/account", headers=_bearer(tok)).json()
+    assert acct["api_key_set_at"] > 0  # drives the rotation nudge
+    assert "sk-ant" not in str(acct)

@@ -18,13 +18,23 @@ class ApiKeyBody(BaseModel):
 
 @router.get("/account")
 def account(request: Request, p: Principal = Depends(current_principal)):
-    has_key = bool(request.app.state.auth and request.app.state.auth.get_byok(p.username))
+    auth = request.app.state.auth
+    has_key = bool(auth and auth.get_byok(p.username))
+    quota = request.app.state.user_quota
+    limit = request.app.state.settings.free_user_questions
     return {
         "username": p.username,
         "role": p.role,
         "tier": "byok" if has_key else "free",
         "has_api_key": has_key,
         "byok_available": request.app.state.cipher is not None,
+        # free-tier allowance, so the UI can show it before the wall is hit.
+        # Read-only here — /query and the chat route are what actually spend it.
+        "free_limit": limit,
+        "free_remaining": quota.remaining(p.username, limit) if quota else None,
+        # when the stored key was set, so the UI can nudge a rotation. Never
+        # the key itself.
+        "api_key_set_at": auth.byok_set_at(p.username) if (auth and has_key) else None,
     }
 
 

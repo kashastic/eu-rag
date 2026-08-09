@@ -1,10 +1,20 @@
-"""Server-side anonymous question quota — the actual cost gate.
+"""Server-side question quotas — the actual cost gates.
 
-Counts anonymous questions per key (client IP) per UTC day on the shared
-Database, so the limit holds across every API instance and cannot be reset by
-clearing browser state. The frontend popup only *reflects* this; it never
-enforces it. A determined attacker rotating IPs is mitigated by a CAPTCHA
-(Turnstile) at the anonymous boundary — see docs/DEPLOY.md.
+Two of them, with deliberately different shapes because they answer different
+questions:
+
+- `AnonQuota` — anonymous questions per key (client IP) **per UTC day**. A
+  recurring allowance: the visitor has no account to attach a history to, so the
+  only sane reset is time. Rotating IPs is mitigated by Turnstile at the
+  anonymous boundary — see docs/DEPLOY.md.
+- `UserQuota` — free questions per logged-in user, **for the lifetime of the
+  account**. This one never resets: it is a one-time trial that ends in BYOK, so
+  the server's key stops paying for a returning free user. There is no day
+  column and nothing is ever swept.
+
+Both live on the shared Database, so the limit holds across every API instance
+and cannot be reset by clearing browser state. The frontend counters only
+*reflect* these; they never enforce them.
 """
 
 from datetime import date, timedelta
@@ -85,4 +95,68 @@ class AnonQuota:
                 "UPDATE anon_quota SET used = used - 1 "
                 "WHERE quota_key = ? AND day = ? AND used > 0",
                 (key, date.today().isoformat()),
+            )
+
+
+_USER_SCHEMA = """
+CREATE TABLE IF NOT EXISTS user_quota (
+    username TEXT PRIMARY KEY,
+    used     INTEGER NOT NULL DEFAULT 0
+);
+"""
+
+
+class UserQuota:
+    """Lifetime free-question allowance for a logged-in user.
+
+    Not a variant of AnonQuota with a different key — a different thing. There
+    is no day column, so this never resets and nothing is ever swept: one row
+    per account that ever asked a question, which is bounded by the user table.
+    Spending it is the end of the free tier, and the only way past it is BYOK.
+
+    A user who adds their own key stops consulting this counter entirely
+    (`deps.paid_tier` returns tier "byok" and the caller skips the gate), so the
+    count is frozen, not lost — removing the key returns them to whatever free
+    questions were left.
+    """
+
+    def __init__(self, db: Database):
+        self._db = db
+        db.executescript(_USER_SCHEMA)
+
+    def remaining(self, username: str, limit: int) -> int:
+        row = self._db.query_one(
+            "SELECT used FROM user_quota WHERE username = ?", (username,)
+        )
+        return max(0, limit - (row["used"] if row else 0))
+
+    def consume(self, username: str, limit: int) -> tuple[bool, int]:
+        """Atomically take one from the lifetime allowance. Returns
+        (allowed, remaining_after); when spent, returns (False, 0) and does not
+        increment."""
+        with self._db.transaction() as tx:
+            row = self._db.query_one(
+                "SELECT used FROM user_quota WHERE username = ?", (username,)
+            )
+            used = row["used"] if row else 0
+            if used >= limit:
+                return False, 0
+            if row is None:
+                tx.execute(
+                    "INSERT INTO user_quota (username, used) VALUES (?, 1)", (username,)
+                )
+            else:
+                tx.execute(
+                    "UPDATE user_quota SET used = used + 1 WHERE username = ?", (username,)
+                )
+        return True, limit - used - 1
+
+    def refund(self, username: str) -> None:
+        """Give back one question consumed by a call that then failed. Guarded
+        so a refund without a matching consume can never push the counter
+        negative."""
+        with self._db.transaction() as tx:
+            tx.execute(
+                "UPDATE user_quota SET used = used - 1 WHERE username = ? AND used > 0",
+                (username,),
             )

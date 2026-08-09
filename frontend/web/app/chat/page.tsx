@@ -179,8 +179,17 @@ export default function ChatPage() {
     try {
       const ans = await api.ask(chat.id, q, industry || undefined);
       setActive((cur) => (cur ? { ...cur, messages: [...cur.messages, answerToMsg(ans)] } : cur));
+      if (typeof ans.free_remaining === "number") {
+        setAccount((a) => (a ? { ...a, free_remaining: ans.free_remaining! } : a));
+      }
       await refreshList();
     } catch (err) {
+      // free allowance spent — the way on is BYOK, so open the key dialog
+      // rather than leaving an error the user can't act on
+      if (err instanceof ApiError && err.code === "free_limit_reached") {
+        setSettingsOpen(true);
+        setAccount((a) => (a ? { ...a, free_remaining: 0 } : a));
+      }
       setActive((cur) => (cur ? { ...cur, messages: [...cur.messages, errMsg(err)] } : cur));
     } finally {
       setPending(false);
@@ -253,8 +262,20 @@ export default function ChatPage() {
 
         {authed && account?.tier === "free" && (
           <div className="tier-banner">
-            You&apos;re on the free tier — a cheaper model answers your queries.
-            <button onClick={() => setSettingsOpen(true)}>Add your Anthropic key for premium models →</button>
+            {account.free_remaining === 0 ? (
+              <>You&apos;ve used all {account.free_limit} free questions.</>
+            ) : (
+              <>
+                Free tier — a cheaper model, and{" "}
+                <strong>
+                  {account.free_remaining} of {account.free_limit} questions
+                </strong>{" "}
+                left.
+              </>
+            )}
+            <button onClick={() => setSettingsOpen(true)}>
+              Add your Anthropic key for premium models →
+            </button>
           </div>
         )}
 
@@ -512,13 +533,19 @@ function SettingsModal({
     onClose();
   }
 
+  const days =
+    account.api_key_set_at != null
+      ? Math.floor((Date.now() / 1000 - account.api_key_set_at) / 86400)
+      : null;
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="auth-card modal" onClick={(e) => e.stopPropagation()}>
         <h1 className="brand" style={{ fontSize: 22 }}>Your Anthropic key</h1>
         <p className="tag">
-          Premium models (Sonnet, with escalation to Opus on hard questions) run on your own
-          Anthropic key, billed to you. Stored encrypted; never shown again.
+          Premium models (Sonnet, escalating to Opus on hard questions) run on your own
+          Anthropic key, billed to you — and they lift the {account.free_limit}-question
+          free limit.
         </p>
         {!account.byok_available && (
           <p className="err">This server isn&apos;t configured for key storage (no encryption key set).</p>
@@ -526,9 +553,28 @@ function SettingsModal({
         {account.has_api_key ? (
           <>
             <p style={{ fontSize: 14, color: "var(--ink-soft)" }}>
-              A key is saved — you&apos;re on the <strong>premium</strong> tier.
+              A key is saved — you&apos;re on the <strong>premium</strong> tier
+              {days != null && (
+                <>
+                  , added <strong>{days === 0 ? "today" : `${days} day${days === 1 ? "" : "s"} ago`}</strong>
+                </>
+              )}
+              .
             </p>
+            {days != null && days >= 30 && (
+              <p className="hint" style={{ textAlign: "left" }}>
+                It&apos;s been a while — consider rotating this key in your Anthropic console.
+              </p>
+            )}
             <button className="btn" onClick={remove} disabled={busy}>Remove key (back to free)</button>
+            <p className="fineprint">
+              Removing it here deletes it from this server. It does <strong>not</strong> revoke it
+              at Anthropic — rotate or delete it in your{" "}
+              <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">
+                Anthropic console
+              </a>{" "}
+              when you&apos;re done.
+            </p>
           </>
         ) : (
           <>
@@ -541,6 +587,25 @@ function SettingsModal({
             <button className="btn" onClick={save} disabled={busy || !account.byok_available || key.length < 20}>
               {busy ? "…" : "Save key"}
             </button>
+            {/* Say plainly what happens to the key. Encryption at rest protects
+                against a stolen database, not against whoever runs this server —
+                promising more than that would be dishonest. */}
+            <div className="fineprint">
+              <p>
+                <strong>Before you paste one:</strong> the key is encrypted (AES-256-GCM) at rest,
+                sent only over HTTPS, never shown again and never returned to your browser. But it
+                is stored on this server and decrypted on each question to call Anthropic as you,
+                so whoever operates this server can technically read it.
+              </p>
+              <p>
+                Create a <strong>dedicated key with a spend limit</strong> in your{" "}
+                <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">
+                  Anthropic console
+                </a>{" "}
+                — never your main key — and revoke it there when you&apos;re done. An Anthropic key
+                can&apos;t be scoped to one app.
+              </p>
+            </div>
           </>
         )}
         <p className="switch"><button type="button" onClick={onClose}>Close</button></p>

@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS users (
     role         TEXT NOT NULL,
     tenant       TEXT NOT NULL,
     created_at   DOUBLE PRECISION NOT NULL,
-    byok_key_enc TEXT
+    byok_key_enc TEXT,
+    byok_set_at  DOUBLE PRECISION
 );
 CREATE TABLE IF NOT EXISTS refresh_tokens (
     jti        TEXT PRIMARY KEY,
@@ -106,13 +107,19 @@ class AuthStore:
         self._db = db
         self._secret = jwt_secret
         db.executescript(_SCHEMA)
-        # migrate pre-BYOK databases in place
-        try:
-            db.execute("ALTER TABLE users ADD COLUMN byok_key_enc TEXT")
-            if not db.is_pg:
-                db._conn.commit()
-        except Exception:
-            pass  # column already present
+        # migrate older databases in place — one ALTER per added column, each
+        # independently guarded so a DB that has one but not the other still
+        # gets the missing one
+        for ddl in (
+            "ALTER TABLE users ADD COLUMN byok_key_enc TEXT",
+            "ALTER TABLE users ADD COLUMN byok_set_at DOUBLE PRECISION",
+        ):
+            try:
+                db.execute(ddl)
+                if not db.is_pg:
+                    db._conn.commit()
+            except Exception:
+                pass  # column already present
 
     # --- users ---------------------------------------------------------------
 
@@ -225,14 +232,16 @@ class AuthStore:
     def set_byok(self, username: str, encrypted: str) -> None:
         with self._db.transaction() as tx:
             tx.execute(
-                "UPDATE users SET byok_key_enc = ? WHERE username = ?",
-                (encrypted, username),
+                "UPDATE users SET byok_key_enc = ?, byok_set_at = ? WHERE username = ?",
+                (encrypted, time.time(), username),
             )
 
     def clear_byok(self, username: str) -> None:
         with self._db.transaction() as tx:
             tx.execute(
-                "UPDATE users SET byok_key_enc = NULL WHERE username = ?", (username,)
+                "UPDATE users SET byok_key_enc = NULL, byok_set_at = NULL"
+                " WHERE username = ?",
+                (username,),
             )
 
     def get_byok(self, username: str) -> str | None:
@@ -240,6 +249,15 @@ class AuthStore:
             "SELECT byok_key_enc FROM users WHERE username = ?", (username,)
         )
         return row["byok_key_enc"] if row else None
+
+    def byok_set_at(self, username: str) -> float | None:
+        """When the stored key was last set — the UI turns this into "added N
+        days ago" so a user can be nudged to rotate a key they've forgotten
+        about. Never the key itself."""
+        row = self._db.query_one(
+            "SELECT byok_set_at FROM users WHERE username = ?", (username,)
+        )
+        return row["byok_set_at"] if row else None
 
     # --- audit ---------------------------------------------------------------
 

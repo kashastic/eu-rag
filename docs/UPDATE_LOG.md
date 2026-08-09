@@ -20,6 +20,61 @@ them. Don't paste the same paragraph into three files — link.
 
 ---
 
+## 2026-08-09 (tiers)
+
+### [DECISION] The logged-in free tier is 10 questions for the life of the account, not per day
+
+**Choice.** `EURAG_FREE_USER_QUESTIONS` (default 10), counted by
+`core.quota.UserQuota` with **no day column** — it never resets. Spent → 402
+`free_limit_reached`, and the only way on is BYOK.
+
+**Why not per-day, like the anonymous tier.** The two quotas answer different
+questions. An anonymous visitor has no account to attach a history to, so the
+only sane reset is time. A logged-in user does — and the point of this gate is
+that the server's key **stops** paying for a returning free user, which a daily
+reset never achieves. This is a conversion gate, not a rate limit; the rate
+limiter already exists separately.
+
+**Two things that would each have been a bug:**
+
+1. **There are two logged-in ask paths.** `/query` with a bearer token *and*
+   `POST /conversations/{id}/messages`, which is the one the web app actually
+   uses for saved chats. A gate on one door is not a gate, so it lives in
+   `deps.spend_free_question` and both routes call it. There is a test that
+   spends through one door and asserts the other counted it — that test is the
+   point, don't delete it when refactoring.
+2. **402, not 401.** The web client treats 401 as "refresh the session token"
+   and would loop instead of showing the wall. This is the *same* trap already
+   recorded for `byok_key_rejected`; it has now cost thinking twice, so: any new
+   "you may not do this, but you are correctly logged in" response is 402/403,
+   never 401.
+
+BYOK skips the counter entirely rather than zeroing it, so the remainder is
+frozen — removing a key returns the user to whatever free questions were left.
+
+### [DECISION] Say plainly what happens to a user's API key, including the part that isn't reassuring
+
+**Choice.** The BYOK dialog states that the key is stored on the server and
+decrypted on each question, so **whoever operates the server can technically
+read it**, and tells the user to create a dedicated key with a spend limit and
+revoke it at Anthropic when done. Removing a key in EURAG is labelled as *not*
+revoking it upstream, and a stored key past 30 days gets a rotation nudge (new
+`users.byok_set_at` column).
+
+**Why.** The old copy — "Stored encrypted; never shown again" — is true and
+reads as a stronger guarantee than the design provides.
+`EURAG_ENCRYPTION_KEY` lives on the same host as the database, so encryption at
+rest defends against a stolen dump or a Postgres-only compromise, **not** against
+root on the box or the operator. Asking strangers for an unscoped credential
+that can spend their whole Anthropic balance and implying it's unreadable is the
+kind of thing that is fine right up until it isn't.
+
+**Treat weakening this copy as a security regression** — the honesty *is* the
+mitigation, because the technical control can't be strengthened without moving
+the encryption key off the host (a KMS), which this deployment doesn't have.
+Full reasoning: [SECURITY.md](SECURITY.md) → "BYOK: what encrypting the user's
+key does and does not protect against".
+
 ## 2026-08-09 (web UI)
 
 ### [GOTCHA] FastAPI's `detail` has three shapes, and the one we didn't parse made every 422 silent

@@ -22,7 +22,7 @@ from core.conversations import ConversationStore
 from core.db import Database, database_url
 from core.generation.llm_client import LLMUnavailableError
 from core.pipeline import Pipeline
-from core.quota import AnonQuota
+from core.quota import AnonQuota, UserQuota
 from core.security.auth import AuthStore, load_or_create_secret
 from core.security.crypto import get_cipher
 
@@ -49,6 +49,7 @@ async def lifespan(app: FastAPI):
     app.state.auth = None
     app.state.conversations = None
     app.state.anon_quota = None
+    app.state.user_quota = None
     app.state.db = None
     if settings.auth_enabled:
         url = database_url()
@@ -58,6 +59,7 @@ async def lifespan(app: FastAPI):
         app.state.auth = AuthStore(db, secret)
         app.state.conversations = ConversationStore(db)
         app.state.anon_quota = AnonQuota(db)
+        app.state.user_quota = UserQuota(db)
         backend = "postgres" if db.is_pg else "sqlite"
         logging.getLogger(__name__).info(
             "auth enabled (%s store) — JWT required, chat history on", backend

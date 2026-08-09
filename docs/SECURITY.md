@@ -51,9 +51,20 @@ credits. Defense:
   the shared DB — the browser popup only reflects this, it never enforces it).
   Spent → 401 `anonymous_limit_reached` → login wall.
 - **Logged-in free tier**: answers on a cheap model (`EURAG_FREE_MODEL`, Haiku)
-  with the Opus escalation **disabled** — bounds per-question cost.
+  with the Opus escalation **disabled** — bounds per-question cost — and capped
+  at `EURAG_FREE_USER_QUESTIONS` (default 10) questions **for the lifetime of
+  the account**, not per day (`core.quota.UserQuota`). This is the piece that
+  stops the server's key paying for a returning free user indefinitely. Spent →
+  **402** `free_limit_reached`, and the only way on is BYOK. Deliberately not
+  401: the web client treats 401 as "refresh the session token" and would loop
+  (same trap as `byok_key_rejected`). Enforced in `deps.spend_free_question`,
+  called by **both** logged-in ask paths — `/query` and
+  `/conversations/{id}/messages` — because a gate on one of two doors is not a
+  gate.
 - **BYOK**: a user stores their own Anthropic key (AES-256-GCM encrypted, never
-  logged or returned); their requests use the full cascade billed **to them**.
+  logged or returned); their requests use the full cascade billed **to them**,
+  and skip the free-tier counter entirely (frozen, not lost — removing the key
+  returns whatever allowance was left).
 - **Rate limiting** (Redis-shared) caps request bursts on top of the above.
 - **Cloudflare Turnstile** (implemented 2026-07-25) gates anonymous questions
   **and registration** whenever `EURAG_TURNSTILE_SECRET` is set. Unset = off, so
@@ -64,6 +75,32 @@ rotating IPs can still get `EURAG_FREE_ANON_QUESTIONS` full-quality questions
 per address. Turnstile raises the cost of *automating* that; it does not
 eliminate it. Set `EURAG_FREE_ANON_QUESTIONS=0` for a BYOK-only deployment
 where the server's key is never spent on strangers.
+
+### BYOK: what encrypting the user's key does and does not protect against
+
+Users are asked to hand over an Anthropic API key, so be precise about the
+guarantee — the UI now states this verbatim rather than implying more.
+
+**What holds.** TLS in transit; AES-256-GCM at rest in `users.byok_key_enc`;
+never returned to the client (`/account` exposes a `has_api_key` boolean and an
+`api_key_set_at` timestamp, never the value); never written to logs or the audit
+trail (the audit row records the *event*, `account.byok_set`); `DELETE
+/account/api-key` genuinely clears it; format-checked before storage.
+
+**What does not.** `EURAG_ENCRYPTION_KEY` lives in the environment of the same
+host as the database. So encryption-at-rest defends against a **stolen DB dump,
+a leaked backup, or a Postgres-only compromise** — not against root on that box,
+not against the operator, and not against a future code change that logs the
+plaintext. The key is also decrypted into process memory on *every* query
+(`deps.paid_tier`), and an Anthropic key cannot be scoped to one application: it
+can spend the user's whole balance anywhere.
+
+**Therefore the mitigation is procedural, and the UI must carry it**: tell the
+user to create a *dedicated* key with a spend limit, never their main key, and
+to revoke it at Anthropic when done. Removing a key here does **not** revoke it
+upstream — the Settings dialog says so, and nudges a rotation once a stored key
+passes 30 days (`api_key_set_at`). Treat any change that weakens this copy as a
+security regression.
 
 ### Turnstile: where it sits and how it fails
 

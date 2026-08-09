@@ -10,7 +10,14 @@ own-key = full cascade billed to them; free = cheap model, no escalation.
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from api.deps import allowed_tenants, client_ip, optional_principal, paid_tier
+from api.deps import (
+    allowed_tenants,
+    client_ip,
+    optional_principal,
+    paid_tier,
+    refund_free_question,
+    spend_free_question,
+)
 from core.generation.llm_client import LLMUnavailableError
 from core.security import turnstile
 from core.security.auth import Principal, question_hash
@@ -99,18 +106,25 @@ def query(
         result["anon_remaining"] = remaining
         return result
 
-    # logged in — tier by BYOK
+    # logged in — tier by BYOK, and the free tier has a lifetime allowance
     plan = paid_tier(request, principal)
-    result = pipeline.query(
-        body.question,
-        industry=body.industry,
-        tenants=allowed_tenants(request, principal),
-        answer_model=plan["answer_model"],
-        escalation_model=plan["escalation_model"],
-        api_key=plan["api_key"],
-        history=_history(body),
-    ).to_dict()
+    free_remaining = spend_free_question(request, principal, plan)
+    try:
+        result = pipeline.query(
+            body.question,
+            industry=body.industry,
+            tenants=allowed_tenants(request, principal),
+            answer_model=plan["answer_model"],
+            escalation_model=plan["escalation_model"],
+            api_key=plan["api_key"],
+            history=_history(body),
+        ).to_dict()
+    except LLMUnavailableError:
+        refund_free_question(request, principal, plan)
+        raise
     result["tier"] = plan["tier"]
+    if free_remaining is not None:
+        result["free_remaining"] = free_remaining
     if app.state.auth_enabled:
         app.state.auth.audit(
             principal.username, "query", detail=question_hash(body.question)

@@ -23,6 +23,9 @@ export type Answer = {
   insufficient: boolean;
   tier?: "anonymous" | "free" | "byok" | "local";
   anon_remaining?: number;
+  /** Free tier only — what's left of the account's lifetime allowance. Absent
+   *  on BYOK, which the server doesn't count. */
+  free_remaining?: number;
 };
 
 export type Account = {
@@ -31,6 +34,11 @@ export type Account = {
   tier: "free" | "byok" | "local";
   has_api_key: boolean;
   byok_available: boolean;
+  free_limit: number;
+  free_remaining: number | null;
+  /** Epoch seconds when the stored key was last set — drives the rotation
+   *  nudge. Never the key itself. */
+  api_key_set_at: number | null;
 };
 
 export type ChatMessage = {
