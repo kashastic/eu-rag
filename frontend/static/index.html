@@ -210,19 +210,18 @@
   }
   .dock { max-width: 780px; margin: 0 auto; }
   .industry-row {
-    display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap;
   }
   .industry-row label {
     font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
     text-transform: uppercase; color: var(--muted); white-space: nowrap;
   }
-  .industry-row input {
-    width: 240px; max-width: 45vw; padding: 6px 10px;
-    font: 13.5px/1.3 var(--serif); font-style: italic; color: var(--ink);
-    background: transparent; border: none; border-bottom: 1px dotted var(--rule-strong);
+  .industry-row select {
+    padding: 5px 8px; font: 13px/1.3 var(--serif); color: var(--ink);
+    background: transparent; border: none;
+    border-bottom: 1px dotted var(--rule-strong);
   }
-  .industry-row input:focus { outline: none; border-bottom: 1px solid var(--navy); font-style: normal; }
-  .industry-row input::placeholder { color: var(--muted); }
+  .industry-row select:focus { outline: none; border-bottom: 1px solid var(--navy); }
   .inputrow {
     display: flex; gap: 0; background: var(--card);
     border: 1px solid var(--rule-strong); border-radius: 3px;
@@ -288,23 +287,16 @@
 
 <form id="form">
   <div class="dock">
+    <!-- Business context. Closed vocabulary, matching core/profile.py — the
+         server rejects anything off-list, and free text is deliberately not
+         offered here (the sentence these build lands in the trusted region of
+         the prompt). Values MUST stay in sync with core/profile.py. -->
     <div class="industry-row">
-      <label for="industry">Your industry · optional</label>
-      <input id="industry" list="industries" placeholder="e.g. software, food, manufacturing…" maxlength="80" autocomplete="off">
-      <datalist id="industries">
-        <option value="software & digital services"></option>
-        <option value="e-commerce & retail"></option>
-        <option value="food & beverage"></option>
-        <option value="manufacturing & machinery"></option>
-        <option value="textiles & apparel"></option>
-        <option value="construction"></option>
-        <option value="health & life sciences"></option>
-        <option value="finance & insurance"></option>
-        <option value="hospitality & tourism"></option>
-        <option value="agriculture"></option>
-        <option value="logistics & transport"></option>
-        <option value="creative & media"></option>
-      </datalist>
+      <label for="p-country">Context · optional</label>
+      <select id="p-country" data-profile="country"><option value="">Country</option></select>
+      <select id="p-size" data-profile="size"><option value="">Size</option></select>
+      <select id="p-sector" data-profile="sector"><option value="">Sector</option></select>
+      <select id="p-ai" data-profile="ai_role"><option value="">AI use</option></select>
     </div>
     <div class="inputrow">
       <input type="text" id="question" placeholder="Ask a compliance or funding question…" autocomplete="off" minlength="3" required>
@@ -320,13 +312,70 @@ const form = document.getElementById("form");
 const input = document.getElementById("question");
 const send = document.getElementById("send");
 const statusEl = document.getElementById("status");
-const industryEl = document.getElementById("industry");
 let queryNo = 0;
 
-/* industry is optional context: remembered locally, sent with each query */
-industryEl.value = localStorage.getItem("eurag-industry") || "";
-industryEl.addEventListener("change", () =>
-  localStorage.setItem("eurag-industry", industryEl.value.trim()));
+/* Business context: four optional closed-vocabulary fields, remembered locally
+   and sent with each query. Mirrors core/profile.py — keep the values in sync;
+   the server 422s anything off-list. */
+const PROFILE_OPTIONS = {
+  country: [["AT","Austria"],["BE","Belgium"],["BG","Bulgaria"],["HR","Croatia"],
+    ["CY","Cyprus"],["CZ","Czechia"],["DK","Denmark"],["EE","Estonia"],
+    ["FI","Finland"],["FR","France"],["DE","Germany"],["GR","Greece"],
+    ["HU","Hungary"],["IE","Ireland"],["IT","Italy"],["LV","Latvia"],
+    ["LT","Lithuania"],["LU","Luxembourg"],["MT","Malta"],["NL","Netherlands"],
+    ["PL","Poland"],["PT","Portugal"],["RO","Romania"],["SK","Slovakia"],
+    ["SI","Slovenia"],["ES","Spain"],["SE","Sweden"],["non_eu","Outside the EU"]],
+  size: [["micro","Under 10 people"],["small","10-49 people"],
+    ["medium","50-249 people"],["large","250+ people"]],
+  sector: [["software","Software & IT"],["manufacturing","Manufacturing"],
+    ["retail","Retail & e-commerce"],["food","Food & drink"],
+    ["healthcare","Healthcare & life sciences"],["finance","Financial services"],
+    ["professional","Professional services"],["construction","Construction"],
+    ["transport","Transport & logistics"],["energy","Energy & utilities"],
+    ["education","Education & training"],["media","Creative & media"],
+    ["agriculture","Agriculture"],["hospitality","Hospitality & tourism"],
+    ["other","Something else"]],
+  /* provider vs deployer, not a yes/no — that is the distinction the AI Act
+     turns on, and the obligations differ by an order of magnitude */
+  ai_role: [["none","We don't use AI"],["deployer","We use others' AI tools"],
+    ["provider","We build or sell AI"]],
+};
+
+const profileEls = Array.from(document.querySelectorAll("[data-profile]"));
+const storedProfile = JSON.parse(localStorage.getItem("eurag.profile.v1") || "{}");
+profileEls.forEach(el => {
+  const field = el.dataset.profile;
+  PROFILE_OPTIONS[field].forEach(([value, label]) => {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = label;
+    el.appendChild(opt);
+  });
+  if (storedProfile[field]) el.value = storedProfile[field];
+  el.addEventListener("change", () =>
+    localStorage.setItem("eurag.profile.v1", JSON.stringify(readProfile())));
+});
+
+/* null rather than "" — the server's vocabulary has no empty member */
+function readProfile() {
+  const p = {};
+  profileEls.forEach(el => { p[el.dataset.profile] = el.value || null; });
+  return p;
+}
+
+/* omit the key entirely when nothing is set: absent and all-null are the same
+   to the server, and an empty object in every body is noise */
+function profileForRequest() {
+  const p = readProfile();
+  return Object.values(p).some(Boolean) ? p : null;
+}
+
+function profileLabel() {
+  return profileEls
+    .map(el => el.options[el.selectedIndex] && el.value ? el.options[el.selectedIndex].text : "")
+    .filter(Boolean)
+    .join(" · ");
+}
 
 /* coverage: list every document actually in the corpus */
 fetch("/documents").then(r => r.json()).then(d => {
@@ -418,13 +467,14 @@ form.addEventListener("submit", async e => {
   if (starter) starter.remove();
   queryNo += 1;
   const stamp = new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
-  const industry = industryEl.value.trim();
+  const profile = profileForRequest();
+  const contextLabel = profileLabel();
 
   const turn = document.createElement("div");
   turn.className = "turn";
   turn.innerHTML =
     `<div class="file-line">Query ${String(queryNo).padStart(3, "0")} · ${stamp}` +
-    (industry ? ` · ${esc(industry)}` : "") + `</div>` +
+    (contextLabel ? ` · ${esc(contextLabel)}` : "") + `</div>` +
     `<p class="q">${esc(question)}</p>` +
     `<div class="a"><p class="pending">Consulting the corpus` +
     `<span class="dots"><span>.</span><span>.</span><span>.</span></span>` +
@@ -437,7 +487,7 @@ form.addEventListener("submit", async e => {
     const res = await fetch("/query", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify(industry ? {question, industry} : {question}),
+      body: JSON.stringify(profile ? {question, profile} : {question}),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();

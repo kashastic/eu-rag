@@ -12,6 +12,7 @@ from core.generation.llm_client import (
 from core.ingestion.chunker import chunk_document
 from core.ingestion.document_loader import Document
 from core.ingestion.embedder import get_embedder
+from core.profile import BusinessProfile
 from core.registry import PUBLIC_TENANT, Registry
 from core.retrieval.bm25 import BM25Index
 from core.retrieval.hybrid_retriever import HybridRetriever
@@ -160,7 +161,7 @@ class Pipeline:
     def query(
         self,
         question: str,
-        industry: str | None = None,
+        profile: BusinessProfile | None = None,
         tenants: list[str] | None = None,
         *,
         answer_model: str | None = None,
@@ -178,11 +179,11 @@ class Pipeline:
         follow-up has no topic of its own to retrieve on. The rewritten form
         is what retrieval AND the answerer see, so the answerer is never handed
         a fragment. Empty/None history is a no-op, which is why local mode and
-        every single-turn caller behave exactly as before."""
-        if industry:
-            # research signal for corpus expansion: which sectors ask questions
-            logger.info("query industry context: %s", industry)
+        every single-turn caller behave exactly as before.
 
+        `profile` is the asker's business context. It reaches the answerer only
+        — retrieval never sees it — so it changes how an answer is framed, never
+        which chunks were found."""
         if history and self.contextualizer is not None:
             question = self.contextualizer.standalone(question, history)
 
@@ -200,7 +201,7 @@ class Pipeline:
             escalation = self.escalation_llm
 
         result = self._answer(
-            question, llm, k=self.settings.top_k, industry=industry, tenants=tenants
+            question, llm, k=self.settings.top_k, profile=profile, tenants=tenants
         )
         # captured before escalation can overwrite `result`: this is WHY the
         # expensive path was taken, which the outcome line below reports
@@ -219,12 +220,15 @@ class Pipeline:
             # answering passage sat below the per-doc cap. Best-effort: if the
             # escalation call itself fails, the primary answer still stands.
             try:
+                # the profile rides the retry too: an escalated answer that
+                # quietly lost the asker's context would be tailored *less* well
+                # than the cheap attempt it replaced
                 deeper = self._answer(
                     question,
                     escalation,
                     k=self.settings.escalation_top_k,
                     max_per_doc=6,
-                    industry=industry,
+                    profile=profile,
                     tenants=tenants,
                 )
             except LLMUnavailableError as exc:
@@ -237,17 +241,23 @@ class Pipeline:
                 result = deeper
         # ONE line per query, unconditionally — this is the denominator. Every
         # other per-query log fires only on a branch (escalation, a failed
-        # rewrite, an industry tag), so counting escalations against them gave
-        # a ratio with no bottom. Keep it ASCII: the first attempt to grep the
-        # escalation log failed partly on the em dash in the line above.
+        # rewrite), so counting escalations against them gave a ratio with no
+        # bottom. Keep it ASCII: the first attempt to grep the escalation log
+        # failed partly on the em dash in the line above.
+        #
+        # The profile rides this line rather than a branch-conditional one of
+        # its own (which is what the old "query industry context:" line was), so
+        # that "which sectors actually ask questions" is countable against the
+        # same denominator as everything else.
         logger.info(
             "query outcome: mode=%s escalated=%s primary_reason=%s "
-            "insufficient=%s citations=%d",
+            "insufficient=%s citations=%d profile=%s",
             result.mode,
             result.escalated,
             primary_reason or "none",
             result.insufficient,
             len(result.citations),
+            (profile or BusinessProfile()).log_summary(),
         )
         return result
 
@@ -257,14 +267,17 @@ class Pipeline:
         llm,
         k: int,
         max_per_doc: int = 2,
-        industry: str | None = None,
+        profile: BusinessProfile | None = None,
         tenants: list[str] | None = None,
     ) -> AnswerResult:
+        # note the profile is NOT passed to retrieve(): retrieval is deliberately
+        # blind to the asker's context, so this stays an answer-side change and
+        # the harness numbers keep their meaning
         chunk_ids = self.retriever.retrieve(
             question, k=k, max_per_doc=max_per_doc, tenants=tenants
         )
         chunks = self.registry.get_chunks(chunk_ids, tenants)
-        return answer_question(question, chunks, llm, industry=industry)
+        return answer_question(question, chunks, llm, profile=profile)
 
     def close(self) -> None:
         self.vectors.close()

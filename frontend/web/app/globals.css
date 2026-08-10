@@ -1,303 +1,478 @@
+/* EURAG — a legal instrument, not an app.
+ *
+ * Black ink on bond paper. The only colour is oxblood, and it is seal ink: it
+ * marks the masthead star, what a claim rests on (citation markers and their
+ * footnotes), what this is not (the stamp), and what cannot be undone
+ * (deletion). Nothing else earns it — if a fifth thing turns red, the four
+ * that matter stop reading as marked.
+ *
+ * Typefaces are fixed at three self-hosted families (see app/fonts.css). Adding
+ * one would mean a font CDN, which would send every visitor's IP to a third
+ * party — /privacy states in writing that this does not happen. The identity
+ * here therefore lives in structure and rules, not in type selection.
+ */
+
 :root {
-  --paper: #f5efe3;
-  --paper-deep: #efe6d3;
-  --card: #fbf7ee;
-  --ink: #22283a;
-  --ink-soft: #4c5165;
-  --muted: #837a64;
-  --navy: #1c3f8f;
-  --navy-deep: #14306e;
-  --gold: #b8860b;
-  --gold-bright: #e8b931;
-  --rule: #d9cdb2;
-  --rule-strong: #b9a97f;
-  --amber-bg: #f6e7c6;
-  --amber-ink: #7a5a12;
-  --red-ink: #8c2f2f;
+  --paper: #fbfaf7;        /* bond white */
+  --paper-2: #f1efe9;      /* inset stock: sidebar, quoted matter */
+  --paper-3: #e7e4dc;      /* deepest inset, used sparingly */
+  --ink: #0c0c0d;          /* wet black */
+  --ink-2: #38383b;        /* body text */
+  --pencil: #7d7d76;       /* marginalia, labels, captions */
+  --rule: #cfccc4;         /* hairline */
+  --rule-2: #a9a59b;       /* structural rule */
+  --seal: #7b1420;         /* seal ink — citations + the stamp, nothing else */
+  --seal-wash: rgba(123, 20, 32, 0.07);
+
   --serif: "Source Serif 4", Georgia, serif;
   --display: "Fraunces", Georgia, serif;
   --mono: "IBM Plex Mono", "SF Mono", Menlo, monospace;
+
+  /* one place to change the apparatus label style, which appears ~20 times */
+  --label: 600 10px/1 var(--mono);
+  --label-track: 0.16em;
 }
+
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; }
 body {
-  background:
-    radial-gradient(1200px 500px at 50% -180px, rgba(184,134,11,.10), transparent 65%),
-    var(--paper);
+  background: var(--paper);
   color: var(--ink);
-  font: 16px/1.6 var(--serif);
+  font: 16px/1.65 var(--serif);
+  -webkit-font-smoothing: antialiased;
 }
-a { color: var(--navy); }
+a { color: var(--ink); text-underline-offset: 2px; }
+
+/* Keyboard focus is visible everywhere, once, rather than per-component. */
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* ---------- shared apparatus ---------- */
+.label,
+.field label,
+.msg .who,
+.cites .lbl,
+.legal-table th,
+.profile-label {
+  font: var(--label); letter-spacing: var(--label-track);
+  text-transform: uppercase; color: var(--pencil);
+}
 
 /* ---------- auth screen ---------- */
 .auth-wrap { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
 .auth-card {
-  width: 100%; max-width: 400px; background: var(--card);
-  border: 1px solid var(--rule-strong); border-radius: 4px; padding: 30px 28px;
-  box-shadow: 0 14px 40px -24px rgba(50,38,8,.5);
+  width: 100%; max-width: 410px; background: var(--paper);
+  border: 1px solid var(--ink); padding: 30px 28px;
+  box-shadow: 6px 6px 0 var(--paper-3);
 }
-.brand { font-family: var(--display); font-weight: 700; font-size: 30px; color: var(--navy-deep); margin: 0; }
-.brand .star { color: var(--gold); font-size: 20px; vertical-align: 5px; }
-.auth-card .tag { color: var(--muted); font-size: 14px; font-style: italic; margin: 4px 0 22px; }
+.brand {
+  font-family: var(--display); font-weight: 600; font-size: 28px;
+  letter-spacing: 0.14em; color: var(--ink); margin: 0;
+}
+.brand .star { color: var(--seal); font-size: 15px; vertical-align: 7px; margin-left: 2px; }
+.auth-card .tag { color: var(--pencil); font-size: 14px; margin: 6px 0 24px; }
 .field { margin-bottom: 14px; }
-.field label {
-  display: block; font-family: var(--mono); font-size: 10px; letter-spacing: .12em;
-  text-transform: uppercase; color: var(--muted); margin-bottom: 5px;
-}
+.field label { display: block; margin-bottom: 6px; }
 .field input {
-  width: 100%; padding: 11px 13px; font: 15px var(--serif); color: var(--ink);
-  background: var(--paper); border: 1px solid var(--rule-strong); border-radius: 3px;
+  width: 100%; padding: 11px 12px; font: 15px var(--serif); color: var(--ink);
+  background: var(--paper); border: 1px solid var(--rule-2); border-radius: 0;
 }
-.field input:focus { outline: none; border-color: var(--navy); }
+.field input:focus { outline: none; border-color: var(--ink); box-shadow: inset 0 -2px 0 var(--ink); }
 .btn {
-  font-family: var(--mono); font-size: 12px; letter-spacing: .16em; text-transform: uppercase;
-  border: none; cursor: pointer; padding: 11px 20px; border-radius: 3px;
-  background: var(--navy); color: #f4efe2; font-weight: 600; width: 100%;
+  font: 600 11px/1 var(--mono); letter-spacing: var(--label-track); text-transform: uppercase;
+  border: 1px solid var(--ink); cursor: pointer; padding: 12px 20px; border-radius: 0;
+  background: var(--ink); color: var(--paper); width: 100%;
 }
-.btn:hover:not(:disabled) { background: var(--gold); color: var(--ink); }
-.btn:disabled { opacity: .5; cursor: wait; }
-.switch { text-align: center; margin-top: 16px; font-size: 14px; color: var(--muted); }
-.switch button { background: none; border: none; color: var(--navy); cursor: pointer; font: inherit; text-decoration: underline; }
-.err { color: var(--red-ink); font-size: 13px; margin: 8px 0 0; }
-.hint { color: var(--muted); font-size: 13px; font-style: italic; margin: 0 0 8px; text-align: center; }
-/* the key-handling disclosure: quiet, but readable — nobody should have to
-   squint at what happens to their API key */
+.btn:hover:not(:disabled) { background: var(--paper); color: var(--ink); }
+.btn:disabled { opacity: 0.45; cursor: wait; }
+.switch { text-align: center; margin-top: 16px; font-size: 14px; color: var(--pencil); }
+.switch button { background: none; border: none; color: var(--ink); cursor: pointer; font: inherit; text-decoration: underline; }
+.err { color: var(--seal); font-size: 13px; margin: 8px 0 0; }
+.hint { color: var(--pencil); font-size: 13px; margin: 0 0 8px; text-align: center; }
 .fineprint { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--rule); }
-.fineprint p { margin: 0 0 8px; font-size: 12.5px; line-height: 1.55; color: var(--ink-soft); }
+.fineprint p { margin: 0 0 8px; font-size: 12.5px; line-height: 1.55; color: var(--ink-2); }
 .fineprint p:last-child { margin-bottom: 0; }
 .fineprint strong { color: var(--ink); }
 
 /* ---------- app shell ---------- */
-.shell { display: grid; grid-template-columns: 280px 1fr; height: 100vh; }
+/* minmax(0, 1fr), not 1fr: a plain `1fr` track floors at min-content, so one
+   nowrap string anywhere inside (the masthead badge, a threshold label) makes
+   the whole column — and therefore the page — wider than a phone screen. */
+.shell { display: grid; grid-template-columns: 264px minmax(0, 1fr); height: 100vh; }
 .sidebar {
-  background: var(--paper-deep); border-right: 1px solid var(--rule);
+  background: var(--paper-2); border-right: 1px solid var(--rule-2);
   display: flex; flex-direction: column; min-height: 0;
 }
-.sidebar-head { padding: 18px 18px 12px; border-bottom: 1px solid var(--rule); }
-.sidebar-head .brand { font-size: 22px; }
+.sidebar-head { padding: 20px 18px 14px; border-bottom: 1px solid var(--rule-2); }
+.sidebar-head .brand { font-size: 19px; }
 .new-chat {
-  margin: 14px 18px; padding: 10px; text-align: left; cursor: pointer;
-  font: 14px var(--serif); color: var(--ink); background: var(--card);
-  border: 1px solid var(--rule-strong); border-radius: 3px;
+  margin: 14px 18px; padding: 10px 12px; text-align: left; cursor: pointer;
+  font: 14px var(--serif); color: var(--ink); background: var(--paper);
+  border: 1px solid var(--rule-2); border-radius: 0;
 }
-.new-chat:hover { border-color: var(--gold); }
-.new-chat::before { content: "+ "; color: var(--gold); font-family: var(--mono); }
+.new-chat:hover { border-color: var(--ink); }
+.new-chat::before { content: "+  "; font-family: var(--mono); color: var(--pencil); }
 .chat-list { flex: 1; overflow-y: auto; padding: 0 10px 10px; min-height: 0; }
 .chat-item {
-  display: flex; align-items: center; gap: 6px; padding: 9px 10px; border-radius: 3px;
-  cursor: pointer; font-size: 14px; color: var(--ink-soft);
+  display: flex; align-items: center; gap: 6px; padding: 9px 10px;
+  cursor: pointer; font-size: 14px; color: var(--ink-2);
+  border-left: 2px solid transparent;
 }
-.chat-item:hover { background: var(--card); }
-.chat-item.active { background: var(--card); color: var(--ink); border-left: 2px solid var(--gold); }
+.chat-item:hover { background: var(--paper); }
+.chat-item.active { background: var(--paper); color: var(--ink); border-left-color: var(--ink); }
 .chat-item .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-item .x { opacity: 0; border: none; background: none; cursor: pointer; color: var(--muted); font-size: 14px; }
-.chat-item:hover .x { opacity: 1; }
-.chat-item .x:hover { color: var(--red-ink); }
+.chat-item .x { opacity: 0; border: none; background: none; cursor: pointer; color: var(--pencil); font-size: 14px; }
+.chat-item:hover .x, .chat-item .x:focus-visible { opacity: 1; }
+.chat-item .x:hover { color: var(--seal); }
 .sidebar-foot {
-  padding: 12px 18px; border-top: 1px solid var(--rule);
-  font-family: var(--mono); font-size: 10px; color: var(--muted);
-  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 18px; border-top: 1px solid var(--rule-2);
+  font: 10px var(--mono); letter-spacing: 0.08em; color: var(--pencil);
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
 }
-.sidebar-foot button { background: none; border: none; color: var(--navy); cursor: pointer; font: inherit; }
+.sidebar-foot span { overflow: hidden; text-overflow: ellipsis; }
+.sidebar-foot button { background: none; border: none; color: var(--ink); cursor: pointer; font: inherit; text-decoration: underline; }
 
-/* ---------- chat pane ---------- */
-.pane { display: flex; flex-direction: column; min-height: 0; }
+/* ---------- masthead ---------- */
+/* Double rule under the masthead: the one piece of ornament, and it is the
+   convention that says "instrument" rather than "web page". */
+.pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .pane-head {
-  padding: 14px 26px; border-bottom: 1px solid var(--rule);
-  font-family: var(--display); font-style: italic; font-size: 17px; color: var(--navy-deep);
-  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  padding: 15px 30px 13px; border-bottom: 3px double var(--ink);
+  display: flex; justify-content: space-between; align-items: baseline; gap: 14px;
 }
-.pane-head .badge { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; color: var(--muted); font-style: normal; }
-.thread { flex: 1; overflow-y: auto; padding: 24px 26px 10px; min-height: 0; }
-.thread-inner { max-width: 760px; margin: 0 auto; }
-.empty {
-  max-width: 620px; margin: 8vh auto 0; text-align: center;
+.pane-head > span:first-child {
+  font-family: var(--display); font-weight: 600; font-size: 16px;
+  letter-spacing: 0.02em; color: var(--ink);
 }
-.empty .lede { font-family: var(--display); font-style: italic; font-size: 26px; color: var(--ink); }
-.empty .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; text-align: left; }
-.empty .cards button {
-  padding: 12px 14px; font: 14px var(--serif); color: var(--ink); cursor: pointer;
-  background: var(--card); border: 1px solid var(--rule); border-radius: 3px;
+.pane-head > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pane-head .badge {
+  font: 10px var(--mono); letter-spacing: 0.13em; text-transform: uppercase;
+  color: var(--pencil); white-space: nowrap; flex: none;
 }
-.empty .cards button:hover { border-color: var(--gold); }
-.empty .cards button::before { content: "→ "; color: var(--gold); font-family: var(--mono); }
+.thread { flex: 1; overflow-y: auto; padding: 0 30px 10px; min-height: 0; }
+.thread-inner { max-width: 860px; margin: 0 auto; min-width: 0; }
 
-.msg { margin-bottom: 22px; }
-.msg.user .who { color: var(--navy-deep); }
-.msg .who {
-  font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
-  color: var(--muted); margin-bottom: 6px;
+/* ---------- the opening statement ---------- */
+/* The home screen explains what EURAG is by behaving like an EURAG answer:
+   the statement carries real citation markers and they resolve to real
+   documents in the corpus. Same apparatus the answers use, so the page is a
+   worked example rather than a claim about one. */
+.empty { max-width: 860px; margin: 0 auto; padding: 46px 0 8px; }
+.opening { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 0 44px; }
+
+.opening-statement { min-width: 0; }
+.statement {
+  font-family: var(--display); font-weight: 600;
+  font-size: clamp(34px, 5vw, 52px); line-height: 1.02; letter-spacing: -0.028em;
+  color: var(--ink); margin: 0 0 22px; text-wrap: balance;
 }
-.msg.user .bubble { font-family: var(--display); font-style: italic; font-size: 19px; color: var(--navy-deep); }
-.answer {
-  background: var(--card); border: 1px solid var(--rule); border-left: 3px solid var(--gold);
-  border-radius: 3px; padding: 16px 20px 6px;
+.statement em { font-style: normal; color: var(--seal); }
+.standfirst { font-size: 17px; line-height: 1.7; color: var(--ink-2); margin: 0 0 14px; max-width: 46ch; }
+.standfirst strong { color: var(--ink); font-weight: 600; }
+
+/* markers in the statement — a button, so it is tabbable and announced */
+.ref {
+  font: 600 11px var(--mono); color: var(--seal); background: none;
+  border: none; padding: 0 0 0 1px; cursor: help; vertical-align: super;
+  line-height: 0; font-feature-settings: "tnum";
 }
+.ref:hover, .ref.on { text-decoration: underline; text-decoration-thickness: 1.5px; }
+
+/* the rail */
+.footnotes { border-top: 1px solid var(--ink); padding-top: 10px; align-self: start; }
+.footnotes-label { font: var(--label); letter-spacing: var(--label-track); text-transform: uppercase; color: var(--pencil); margin-bottom: 12px; }
+.footnote {
+  display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px;
+  padding: 9px 6px 9px 0; border-bottom: 1px solid var(--rule);
+  font-size: 13px; line-height: 1.45; color: var(--ink-2);
+}
+.footnote:last-of-type { border-bottom: none; }
+.footnote.on { background: var(--seal-wash); }
+.footnote .n { font: 600 11px var(--mono); color: var(--seal); padding-top: 2px; }
+.footnote .doc { color: var(--ink); font-weight: 600; display: block; }
+.footnote .celex { font: 10.5px var(--mono); color: var(--pencil); letter-spacing: 0.04em; }
+
+/* starters */
+.starters { margin-top: 40px; border-top: 1px solid var(--rule-2); padding-top: 16px; }
+.profile-intro + .starters, .starters + .profile-intro { margin-top: 26px; }
+.starters-label { font: var(--label); letter-spacing: var(--label-track); text-transform: uppercase; color: var(--pencil); margin-bottom: 12px; }
+.empty .cards { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 26px; }
+.empty .cards button {
+  padding: 12px 0; font: 15px/1.4 var(--serif); color: var(--ink); cursor: pointer;
+  background: none; border: none; border-bottom: 1px solid var(--rule);
+  text-align: left; display: flex; gap: 10px; align-items: baseline;
+}
+.empty .cards button::before { content: "\203A"; font-family: var(--mono); color: var(--pencil); flex: none; }
+.empty .cards button:hover { color: var(--seal); }
+.empty .cards button:hover::before { color: var(--seal); }
+
+/* ---------- transcript ---------- */
+.msg { margin-bottom: 26px; }
+.msg .who { margin-bottom: 7px; }
+.msg.user .who { color: var(--ink); }
+.msg.user .bubble {
+  font-family: var(--display); font-weight: 600; font-size: 21px;
+  line-height: 1.25; letter-spacing: -0.015em; color: var(--ink);
+}
+/* An answer is quoted matter: indented behind a rule, the way a filing sets
+   off the text it is relying on. */
+.answer { border-left: 1px solid var(--ink); padding: 2px 0 2px 20px; }
 .answer p { margin: 0 0 12px; }
-.answer h4 { font-family: var(--display); font-size: 16px; margin: 14px 0 8px; color: var(--navy-deep); }
-.answer ul, .answer ol { margin: 0 0 12px; padding-left: 22px; }
-.answer ul { list-style: none; padding-left: 4px; }
+.answer h4 { font-family: var(--display); font-weight: 600; font-size: 16px; margin: 16px 0 8px; }
+.answer ul, .answer ol { margin: 0 0 12px; padding-left: 20px; }
+.answer ul { list-style: none; padding-left: 0; }
 .answer ul li { position: relative; padding-left: 18px; }
-.answer ul li::before { content: "▪"; color: var(--gold); position: absolute; left: 0; font-size: 12px; }
-.answer strong { color: var(--navy-deep); }
-.answer code { font-family: var(--mono); font-size: .85em; background: var(--paper-deep); padding: 1px 5px; border-radius: 3px; }
+.answer ul li::before { content: "\2014"; color: var(--pencil); position: absolute; left: 0; }
+.answer strong { color: var(--ink); font-weight: 600; }
+.answer code { font: 0.85em var(--mono); background: var(--paper-2); padding: 1px 5px; }
 .answer sup.marker {
-  font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--navy);
-  background: rgba(28,63,143,.08); border: 1px solid rgba(28,63,143,.25);
-  border-radius: 3px; padding: 1px 4px; margin: 0 1px; cursor: pointer;
+  font: 600 11px var(--mono); color: var(--seal); background: none; border: none;
+  padding: 0 1px; cursor: pointer; font-feature-settings: "tnum";
 }
-.answer sup.marker:hover { background: var(--navy); color: var(--card); }
-.flags { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+.answer sup.marker:hover { text-decoration: underline; text-decoration-thickness: 1.5px; }
+.flags { margin-top: 10px; display: flex; gap: 14px; flex-wrap: wrap; }
 .flag {
-  font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
-  padding: 2px 7px; border: 1px solid var(--rule); border-radius: 2px; color: var(--muted); background: var(--card);
+  font: 10px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--pencil); padding: 0;
 }
-.flag.escalated { border-color: var(--gold); color: var(--gold); background: rgba(232,185,49,.08); }
-.flag.insufficient { border-color: var(--amber-ink); color: var(--amber-ink); background: var(--amber-bg); }
-.cites { margin-top: 12px; border-top: 1px solid var(--rule); padding-top: 10px; }
-.cites .lbl { font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
-.cite { display: grid; grid-template-columns: 30px 1fr; gap: 6px; font-size: 13.5px; color: var(--ink-soft); padding: 5px 3px; border-radius: 3px; }
-.cite.flash { background: rgba(232,185,49,.25); }
-.cite .fn { font-family: var(--mono); font-size: 11px; color: var(--navy); padding-top: 2px; }
+/* separator BETWEEN flags — on ::before of every flag it renders as a stray
+   dot in front of the common case, which is a single flag */
+.flag + .flag::before { content: "\00b7  "; }
+.flag.escalated, .flag.insufficient { color: var(--ink); }
+.cites { margin-top: 14px; border-top: 1px solid var(--rule); padding-top: 11px; }
+.cites .lbl { margin-bottom: 9px; }
+.cite {
+  display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 6px;
+  font-size: 13.5px; color: var(--ink-2); padding: 5px 4px;
+}
+.cite.flash { background: var(--seal-wash); }
+.cite .fn { font: 600 11px var(--mono); color: var(--seal); padding-top: 3px; }
 .cite .t { font-weight: 600; color: var(--ink); }
-.cite a { font-family: var(--mono); font-size: 11px; margin-left: 8px; }
-.cite .q { display: block; font-style: italic; font-size: 13px; margin-top: 2px; }
-.pending { color: var(--muted); font-style: italic; }
+.cite a { font: 10.5px var(--mono); margin-left: 8px; letter-spacing: 0.04em; }
+.cite .q { display: block; font-style: italic; font-size: 13px; margin-top: 3px; color: var(--pencil); }
+.pending { color: var(--pencil); font-style: italic; }
 
 /* ---------- composer ---------- */
-.composer { padding: 16px 26px 20px; border-top: 1px solid var(--rule); background: var(--paper); }
-.composer-inner { max-width: 760px; margin: 0 auto; }
-.industry-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.industry-row label { font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
-.industry-row input { flex: 0 0 240px; padding: 5px 9px; font: 13px var(--serif); font-style: italic; background: transparent; border: none; border-bottom: 1px dotted var(--rule-strong); color: var(--ink); }
-.industry-row input:focus { outline: none; border-bottom: 1px solid var(--navy); font-style: normal; }
-.inputrow { display: flex; background: var(--card); border: 1px solid var(--rule-strong); border-radius: 3px; }
-.inputrow:focus-within { border-color: var(--navy); }
+.composer { padding: 14px 30px 16px; border-top: 1px solid var(--rule-2); background: var(--paper); }
+.composer-inner { max-width: 860px; margin: 0 auto; }
+.industry-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; min-height: 20px; flex-wrap: wrap; }
+.inputrow {
+  display: flex; background: var(--paper); border: 1px solid var(--ink);
+  box-shadow: 4px 4px 0 var(--paper-3);
+}
+.inputrow:focus-within { box-shadow: 4px 4px 0 var(--rule); }
 .inputrow textarea {
   flex: 1; resize: none; border: none; background: transparent; padding: 13px 15px;
-  font: 16px/1.4 var(--serif); color: var(--ink); max-height: 160px;
+  font: 16px/1.45 var(--serif); color: var(--ink); max-height: 160px;
 }
 .inputrow textarea:focus { outline: none; }
 .inputrow button {
-  font-family: var(--mono); font-size: 12px; letter-spacing: .16em; text-transform: uppercase;
-  border: none; cursor: pointer; margin: 6px; padding: 0 20px; border-radius: 2px;
-  background: var(--navy); color: #f4efe2; font-weight: 600;
+  font: 600 11px var(--mono); letter-spacing: var(--label-track); text-transform: uppercase;
+  border: none; border-left: 1px solid var(--ink); cursor: pointer; padding: 0 22px;
+  background: var(--ink); color: var(--paper);
 }
-.inputrow button:hover:not(:disabled) { background: var(--gold); color: var(--ink); }
-.inputrow button:disabled { opacity: .45; cursor: wait; }
-.disclaimer { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-top: 8px; text-align: center; }
+.inputrow button:hover:not(:disabled) { background: var(--paper); color: var(--ink); }
+.inputrow button:disabled { opacity: 0.4; cursor: wait; }
+
+/* The stamp. In a design that borrows a law firm's clothes this is the one
+   thing that must not be mistaken for decoration, so it gets the seal ink and
+   the only rotation on the page. */
+.disclaimer {
+  margin-top: 11px; display: flex; align-items: center; justify-content: center;
+  gap: 14px; flex-wrap: wrap; font: 10.5px var(--mono); color: var(--pencil);
+}
+.stamp {
+  border: 1.5px solid var(--seal); color: var(--seal);
+  font: 600 9.5px var(--mono); letter-spacing: 0.18em; text-transform: uppercase;
+  padding: 4px 8px; transform: rotate(-1.5deg); white-space: nowrap;
+}
+.disclaimer a { color: var(--pencil); text-decoration: underline; }
+.disclaimer a:hover { color: var(--ink); }
+
+/* ---------- business context ---------- */
+/* The schedule attached to the instrument: the facts the reader supplies.
+   Offered above the starters, never a gate — the composer stays live. */
+.profile-intro { margin: 34px 0 0; border: 1px solid var(--ink); padding: 18px 20px 20px; text-align: left; }
+.profile-intro-head { display: flex; align-items: flex-start; gap: 14px; }
+.profile-intro h2 { font: var(--label); letter-spacing: var(--label-track); text-transform: uppercase; color: var(--pencil); margin: 0 0 7px; }
+.profile-intro p { font: 13.5px/1.55 var(--serif); color: var(--ink-2); margin: 0; max-width: 58ch; }
+.profile-skip {
+  margin-left: auto; flex: none; background: none; border: none; cursor: pointer;
+  font: 10px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--pencil); text-decoration: underline;
+}
+.profile-skip:hover { color: var(--ink); }
+
+.profile-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 26px; margin-top: 20px; }
+.profile-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.profile-field select {
+  padding: 8px 6px 8px 0; font: 15px var(--serif); color: var(--ink);
+  background: transparent; border: none; border-bottom: 1px solid var(--rule-2);
+  border-radius: 0;
+}
+.profile-field select:focus { outline: none; border-bottom: 2px solid var(--ink); }
+.profile-hint { font: 12px/1.45 var(--serif); color: var(--pencil); }
+
+/* The size field is a bar with the statutory lines marked on it. These numbers
+   are not decoration: 10 / 50 / 250 are where EU law keeps changing what is
+   owed, which is the whole reason the field is asked at all. */
+.threshold { grid-column: 1 / -1; border: none; margin: 0; padding: 0; min-width: 0; }
+.threshold legend { padding: 0; margin-bottom: 8px; font: var(--label); letter-spacing: var(--label-track); text-transform: uppercase; color: var(--pencil); }
+.threshold-bar { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--rule-2); }
+.threshold-bar > div { position: relative; display: flex; }
+.threshold-bar > div + div { border-left: 1px solid var(--rule-2); }
+.threshold input { position: absolute; opacity: 0; pointer-events: none; }
+.threshold label {
+  flex: 1; text-align: center; padding: 9px 4px; cursor: pointer;
+  font: 13px var(--mono); color: var(--ink-2); white-space: nowrap;
+  font-feature-settings: "tnum";
+}
+.threshold label:hover { background: var(--paper-2); }
+.threshold input:checked + label { background: var(--ink); color: var(--paper); }
+.threshold input:focus-visible + label { outline: 2px solid var(--ink); outline-offset: -2px; }
+/* the statutory lines, sitting on the boundaries between bands */
+.threshold-marks { position: relative; height: 15px; margin-top: 3px; }
+.threshold-marks span {
+  position: absolute; transform: translateX(-50%); font: 10px var(--mono);
+  color: var(--pencil); letter-spacing: 0.04em;
+}
+.threshold-note { font: 12px/1.45 var(--serif); color: var(--pencil); margin: 5px 0 0; }
+
+/* collapsed form, above the composer */
+.profile-summary { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.profile-summary-text {
+  font: 10px var(--mono); letter-spacing: 0.06em; color: var(--ink-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: uppercase;
+}
+.profile-summary button, .profile-open {
+  flex: none; background: none; border: none; cursor: pointer;
+  font: 10px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--pencil); text-decoration: underline;
+}
+.profile-summary button:hover, .profile-open:hover { color: var(--ink); }
+.modal .profile-fields { margin-top: 18px; }
+.modal .profile-fields + .btn { margin-top: 22px; }
 
 /* ---------- bot gate ---------- */
-/* The Turnstile widget runs at submit time and only paints anything when
-   Cloudflare asks this visitor to interact, so the container claims no space
-   until it does (measured: 0px tall idle). `.active` is set from Turnstile's
-   before/after-interactive callbacks — the widget renders into a shadow root,
-   so there is no child selector to hang the spacing off. */
 .turnstile { display: flex; justify-content: center; }
 .turnstile.active { margin-bottom: 12px; }
 
 .spin { display: inline-block; }
 .spin span { animation: blink 1.4s infinite both; }
-.spin span:nth-child(2) { animation-delay: .2s; }
-.spin span:nth-child(3) { animation-delay: .4s; }
-@keyframes blink { 0%,80%,100% { opacity: .2; } 40% { opacity: 1; } }
+.spin span:nth-child(2) { animation-delay: 0.2s; }
+.spin span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes blink { 0%, 80%, 100% { opacity: 0.2; } 40% { opacity: 1; } }
 
 /* ---------- anonymous sidebar ---------- */
-.anon-side { padding: 20px 18px; color: var(--ink-soft); font-size: 14px; display: flex; flex-direction: column; gap: 14px; }
-.anon-side p { margin: 0; font-style: italic; }
-.anon-left { margin-left: auto; font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--gold); }
+.anon-side { padding: 20px 18px; color: var(--ink-2); font-size: 14px; display: flex; flex-direction: column; gap: 14px; }
+.anon-side p { margin: 0; }
+.anon-left { margin-left: auto; font: 10px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink); white-space: nowrap; }
 
 /* ---------- tier banner ---------- */
 .tier-banner {
-  background: var(--amber-bg); border-bottom: 1px solid var(--rule-strong);
-  padding: 10px 26px; font-size: 14px; color: var(--amber-ink);
+  background: var(--paper-2); border-bottom: 1px solid var(--rule-2);
+  padding: 9px 30px; font-size: 13.5px; color: var(--ink-2);
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
 }
+.tier-banner strong { color: var(--ink); }
 .tier-banner button {
-  background: none; border: none; cursor: pointer; color: var(--navy);
+  background: none; border: none; cursor: pointer; color: var(--ink);
   font: inherit; font-weight: 600; text-decoration: underline;
 }
 
 /* ---------- modals ---------- */
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 50; display: grid; place-items: center;
-  padding: 20px; background: rgba(28,24,14,.45); backdrop-filter: blur(2px);
+  padding: 20px; background: rgba(12, 12, 13, 0.4);
 }
-.auth-card.modal { max-width: 420px; animation: pop .18s ease both; }
-@keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
-/* Google renders its own button into .google-btn — its styling is fixed by
-   Google's brand rules, so we only place it. */
+.auth-card.modal { max-width: 430px; animation: pop 0.16s ease both; }
+.auth-card.modal h2 { font-family: var(--display); font-weight: 600; font-size: 21px; margin: 0 0 6px; }
+.auth-card.modal .muted { color: var(--pencil); font-size: 13.5px; line-height: 1.55; margin: 0 0 4px; }
+@keyframes pop { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .google-btn { display: flex; justify-content: center; margin-top: 4px; min-height: 44px; }
 .or {
   display: flex; align-items: center; gap: 10px; margin: 16px 0 12px;
-  font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
-  text-transform: uppercase; color: var(--muted);
+  font: var(--label); letter-spacing: var(--label-track); text-transform: uppercase; color: var(--pencil);
 }
 .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
 
-/* ---------- legal pages (/privacy, /terms) ----------
-   Long-form reading, so this is the one place in the app that gets a measure
-   and generous leading rather than app chrome. */
-.legal {
-  max-width: 720px; margin: 0 auto; padding: 40px 24px 64px;
-  font-size: 16.5px; line-height: 1.7;
-}
+/* ---------- legal pages (/privacy, /terms) ---------- */
+.legal { max-width: 700px; margin: 0 auto; padding: 44px 24px 64px; font-size: 16.5px; line-height: 1.72; }
 .legal-head {
   display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
-  padding-bottom: 14px; border-bottom: 1px solid var(--rule-strong); margin-bottom: 34px;
+  padding-bottom: 14px; border-bottom: 3px double var(--ink); margin-bottom: 34px;
 }
-.legal-head .brand { font-size: 22px; text-decoration: none; }
-.legal-date { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; color: var(--muted); }
-.legal h1 { font-family: var(--display); font-size: 38px; line-height: 1.15; margin: 0 0 14px; color: var(--navy-deep); }
+.legal-head .brand { font-size: 19px; text-decoration: none; }
+.legal-date { font: 10.5px var(--mono); letter-spacing: 0.1em; color: var(--pencil); text-transform: uppercase; }
+.legal h1 {
+  font-family: var(--display); font-weight: 600; font-size: clamp(32px, 5vw, 44px);
+  line-height: 1.06; letter-spacing: -0.025em; margin: 0 0 16px;
+}
 .legal h2 {
-  font-family: var(--display); font-size: 20px; margin: 38px 0 10px;
-  color: var(--navy-deep); padding-top: 14px; border-top: 1px solid var(--rule);
+  font-family: var(--display); font-weight: 600; font-size: 20px; margin: 40px 0 10px;
+  padding-top: 14px; border-top: 1px solid var(--rule);
 }
-.legal h2.flag { color: var(--amber-ink); border-top-color: var(--rule-strong); }
-.legal .lede { font-size: 18px; font-style: italic; color: var(--ink-soft); margin: 0 0 8px; }
-.legal ul { padding-left: 20px; }
+.legal h2.flag { color: var(--seal); border-top-color: var(--rule-2); }
+.legal h2.flag::before { content: none; }
+.legal .lede { font-size: 18px; color: var(--ink-2); margin: 0 0 8px; }
+.legal ul { padding-left: 18px; }
 .legal li { margin-bottom: 10px; }
-.legal code { font-family: var(--mono); font-size: 13px; background: var(--paper-deep); padding: 1px 5px; border-radius: 3px; }
-.legal .note {
-  background: var(--amber-bg); color: var(--amber-ink);
-  padding: 12px 15px; border-radius: 3px; font-size: 14.5px; line-height: 1.6;
-}
-.legal .note strong { color: var(--amber-ink); }
-/* the data table is the densest thing here — it scrolls inside its own box on
-   a narrow screen rather than making the page scroll sideways */
+.legal code { font: 13px var(--mono); background: var(--paper-2); padding: 1px 5px; }
+.legal .note { border-left: 2px solid var(--seal); background: var(--paper-2); padding: 12px 15px; font-size: 14.5px; line-height: 1.62; }
+.legal .note strong { color: var(--ink); }
 .legal-scroll { overflow-x: auto; margin-bottom: 18px; }
 .legal-table { width: 100%; min-width: 480px; border-collapse: collapse; font-size: 14px; margin-top: 6px; }
-.legal-table th, .legal-table td { text-align: left; vertical-align: top; padding: 9px 12px 9px 0; border-bottom: 1px solid var(--rule); }
-.legal-table th {
-  font-family: var(--mono); font-size: 10px; letter-spacing: .12em;
-  text-transform: uppercase; color: var(--muted); font-weight: 600;
-}
-.legal-table td:first-child { font-weight: 600; width: 26%; }
-.legal-foot {
-  display: flex; gap: 22px; margin-top: 46px; padding-top: 16px;
-  border-top: 1px solid var(--rule-strong); font-size: 14px;
-}
-/* the composer's one-line disclaimer, now a route to the long form */
-.disclaimer a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
-.disclaimer a:hover { color: var(--navy); }
+.legal-table th, .legal-table td { text-align: left; vertical-align: top; padding: 10px 12px 10px 0; border-bottom: 1px solid var(--rule); }
+.legal-table th { border-bottom-color: var(--ink); padding-bottom: 7px; }
+.legal-table td:first-child { font-weight: 600; width: 26%; color: var(--ink); }
+.legal-foot { display: flex; gap: 22px; margin-top: 46px; padding-top: 16px; border-top: 1px solid var(--rule-2); font-size: 14px; }
 
-/* Delete account — destructive, so it is visually separated from the BYOK
-   controls above it and never the primary button in the dialog. */
-.danger-zone { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--rule-strong); }
+/* ---------- destructive ---------- */
+.danger-zone { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--rule-2); }
 .danger-zone > button {
-  background: none; border: 1px solid var(--red-ink); color: var(--red-ink);
-  font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
-  padding: 9px 14px; border-radius: 3px; cursor: pointer; width: 100%;
+  background: none; border: 1px solid var(--seal); color: var(--seal);
+  font: 600 11px var(--mono); letter-spacing: var(--label-track); text-transform: uppercase;
+  padding: 10px 14px; border-radius: 0; cursor: pointer; width: 100%;
 }
-.danger-zone > button:hover:not(:disabled) { background: var(--red-ink); color: var(--card); }
-.danger-zone > button:disabled { opacity: .5; cursor: wait; }
-.danger-zone p { font-size: 12.5px; line-height: 1.55; color: var(--ink-soft); margin: 0 0 10px; }
+.danger-zone > button:hover:not(:disabled) { background: var(--seal); color: var(--paper); }
+.danger-zone > button:disabled { opacity: 0.5; cursor: wait; }
+.danger-zone p { font-size: 12.5px; line-height: 1.55; color: var(--ink-2); margin: 0 0 10px; }
 
-@media (prefers-reduced-motion: reduce) { .auth-card.modal { animation: none; } }
+/* ---------- page-load sequence ----------
+   One orchestrated moment on first paint, then nothing. The statement settles,
+   then its footnotes arrive — which is the order you would read them in. */
+.opening-statement { animation: settle 0.5s ease both; }
+.footnotes { animation: settle 0.5s ease 0.22s both; }
+.starters { animation: settle 0.5s ease 0.34s both; }
+@keyframes settle { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-card.modal, .opening-statement, .footnotes, .starters { animation: none; }
+  .spin span { animation: none; opacity: 0.6; }
+}
+
+@media (max-width: 900px) {
+  .opening { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  /* stacked, the rail becomes what footnotes always are on a narrow page: a
+     list at the bottom of the text */
+  .footnotes { max-width: 46ch; }
+}
 @media (max-width: 720px) {
-  .shell { grid-template-columns: 1fr; }
+  .shell { grid-template-columns: minmax(0, 1fr); }
   .sidebar { display: none; }
-  .empty .cards { grid-template-columns: 1fr; }
+  /* the corpus count still fits and still matters; the tagline does not */
+  .pane-head .badge .tagline { display: none; }
+  .thread, .composer, .pane-head, .tier-banner { padding-left: 18px; padding-right: 18px; }
+  .empty { padding-top: 30px; }
+  .empty .cards { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .profile-fields { grid-template-columns: minmax(0, 1fr); }
+  /* Side by side, the field is ~250px and the placeholder wraps onto a second
+     line the one-row textarea has no height for, so it reads as clipped. Full
+     width for the field, full width for the button under it. */
+  .inputrow { flex-wrap: wrap; }
+  /* rows=1 gives a one-line box, but the placeholder needs two lines on a
+     narrow screen and the overflow reads as a clipped word */
+  .inputrow textarea { flex: 1 0 100%; min-height: 68px; font-size: 15.5px; }
+  .inputrow button { width: 100%; border-left: none; border-top: 1px solid var(--ink); padding: 13px 0; }
+  .threshold label { font-size: 11.5px; padding: 9px 2px; }
   .legal { padding: 28px 18px 48px; }
-  .legal h1 { font-size: 30px; }
 }

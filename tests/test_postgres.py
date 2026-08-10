@@ -16,6 +16,7 @@ import pytest
 
 from core.conversations import ConversationStore
 from core.db import Database
+from core.profile import BusinessProfile
 from core.security.auth import AuthError, AuthStore
 
 URL = os.environ.get("EURAG_TEST_DATABASE_URL")
@@ -94,9 +95,64 @@ def test_authstore_migrates_a_pre_google_table(db):
     store = AuthStore(db, "s" * 40)  # must not raise
     row = db.query_one("SELECT * FROM users WHERE username = 'legacyuser'")
     assert row["google_sub"] is None and row["byok_set_at"] is None
+    # the profile columns are the newest link in the same ALTER chain
+    assert row["profile_country"] is None and row["profile_ai_role"] is None
     assert store.upsert_google_user("pg-sub-1", "pguser@example.com").username == "pguser"
+    store.set_profile("legacyuser", BusinessProfile(country="FR", size="medium"))
+    assert store.get_profile("legacyuser").size == "medium"
     names = {r["indexname"] for r in db.query(
         "SELECT indexname FROM pg_indexes WHERE tablename = %s", (table,)
     )}
     assert "users_google_sub" in names
     AuthStore(db, "s" * 40)  # a redeploy re-runs this — idempotent
+
+
+def test_authstore_migrates_the_currently_deployed_table(db):
+    """The other migration test starts from the *pre-Google* shape, which is
+    two releases behind what is actually running. The upgrade that matters on
+    any given deploy is the one from the shape in production right now — here,
+    google_sub and email present, profile columns absent.
+
+    Worth its own test because the shapes differ in what has already run: this
+    one starts with `users_google_sub` already created, so it also proves the
+    guarded `CREATE UNIQUE INDEX` is genuinely idempotent against a real
+    Postgres rather than only against a fresh database.
+    """
+    db.executescript("DROP TABLE IF EXISTS users CASCADE;")
+    db.executescript(
+        """
+        CREATE TABLE users (
+            username     TEXT PRIMARY KEY,
+            salt         TEXT NOT NULL,
+            pw_hash      TEXT NOT NULL,
+            role         TEXT NOT NULL,
+            tenant       TEXT NOT NULL,
+            created_at   DOUBLE PRECISION NOT NULL,
+            byok_key_enc TEXT,
+            byok_set_at  DOUBLE PRECISION,
+            google_sub   TEXT,
+            email        TEXT
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users (google_sub);
+        """
+    )
+    db.execute(
+        "INSERT INTO users (username, salt, pw_hash, role, tenant, created_at)"
+        " VALUES ('pwuser', 'aa', 'bb', 'admin', 'pwuser', 1.0)"
+    )
+    # a Google account stores an empty pw_hash — it must survive the ALTERs too
+    db.execute(
+        "INSERT INTO users (username, salt, pw_hash, role, tenant, created_at,"
+        " google_sub, email) VALUES ('goog', 'cc', '', 'user', 'goog', 2.0,"
+        " 'sub-123', 'g@example.com')"
+    )
+
+    store = AuthStore(db, "s" * 40)  # the boot path — must not raise
+
+    assert db.query_one("SELECT * FROM users WHERE username = 'pwuser'")["profile_country"] is None
+    assert store.get_profile("pwuser") == BusinessProfile()
+    store.set_profile("pwuser", BusinessProfile(country="DE", ai_role="provider"))
+    assert store.get_profile("pwuser").ai_role == "provider"
+    # the existing Google identity still resolves on google_sub after migrating
+    assert store.upsert_google_user("sub-123", "g@example.com").username == "goog"
+    AuthStore(db, "s" * 40)  # redeploy re-runs it

@@ -2,6 +2,8 @@
 // transparently rotates it once on 401 using the refresh token, and clears
 // the session if refresh fails.
 
+import type { Profile } from "./profile";
+
 const BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 const ACCESS = "eurag_access";
@@ -39,6 +41,8 @@ export type Account = {
   /** Epoch seconds when the stored key was last set — drives the rotation
    *  nudge. Never the key itself. */
   api_key_set_at: number | null;
+  /** The stored business context, so signing in on a new device restores it. */
+  profile: Profile | null;
 };
 
 export type ChatMessage = {
@@ -180,7 +184,7 @@ export const api = {
   // server caps and trims what it uses; sending the last few turns is enough.
   async queryAnon(
     question: string,
-    industry?: string,
+    profile?: Profile,
     turnstileToken?: string,
     history?: HistoryTurn[]
   ) {
@@ -188,7 +192,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({
         question,
-        ...(industry ? { industry } : {}),
+        ...(profile ? { profile } : {}),
         ...(turnstileToken ? { turnstile_token: turnstileToken } : {}),
         ...(history?.length ? { history: history.slice(-HISTORY_TURNS) } : {}),
       }),
@@ -239,10 +243,18 @@ export const api = {
   async deleteChat(id: string) {
     return request(`/conversations/${id}`, { method: "DELETE" });
   },
-  async ask(id: string, question: string, industry?: string) {
+  async ask(id: string, question: string, profile?: Profile) {
     return request<Answer>(`/conversations/${id}/messages`, {
       method: "POST",
-      body: JSON.stringify(industry ? { question, industry } : { question }),
+      body: JSON.stringify(profile ? { question, profile } : { question }),
+    });
+  },
+  /** Persist the profile against the account so a second device recovers it.
+   *  Anonymous visitors never call this — their profile stays in the browser. */
+  async saveProfile(profile: Profile) {
+    return request<{ profile: Profile }>("/account/profile", {
+      method: "PUT",
+      body: JSON.stringify(profile),
     });
   },
 };

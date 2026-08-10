@@ -1,8 +1,13 @@
 # HANDOFF — continue here
 
 **As of:** 2026-08-10 · **EURAG is LIVE** at <https://eurag.duckdns.org> ·
-prod runs `15cbfc0`; `origin/main` is ahead only by this docs commit, which
-changes no code · **277 tests pass, 7 skipped** locally.
+prod runs `15cbfc0` · **307 tests pass, 7 skipped** locally.
+
+> **Uncommitted and not yet deployed:** the business-context batch (intro-screen
+> profile — country / size / sector / AI role). Backend, frontend, tests, and
+> `/privacy` are done and verified locally; nothing is on prod. See *What
+> shipped 2026-08-10 (business context)* below and `docs/DEVLOG.md` for the
+> numbers.
 
 Read [`CLAUDE.md`](../CLAUDE.md) first for standing rules — it wins on *how to
 work here*; this file wins on *what is true right now*. Build history with
@@ -224,6 +229,38 @@ against the real processing, and chat retention is "until you delete it" rather
 than a policy. The safe public phrasing is the one already on the page: *no
 cookies, no tracking, no analytics*, which is checkable.
 
+## What shipped 2026-08-10 (business context) — local only, not deployed
+
+Four optional, closed-vocabulary fields — country, company size band, sector,
+AI role — offered on the intro screen and used to tailor answers. Replaces the
+free-text `Industry · optional` box, which was per-query and ephemeral.
+
+- **Enums, never free text.** The context sentence lands *outside* the
+  `BEGIN SOURCES` fence, in the region the model is told to obey, and it is now
+  persistent (it rides every future question, including saved chats). The user
+  picks an option; the server writes the sentence (`core/profile.py`).
+- **The AI field asks provider vs deployer**, not "do you use AI" — that is the
+  distinction Reg. 2024/1689 turns on, and a boolean can't change an answer.
+  Verified live: the same question returns Art. 26 deployer duties for one and
+  Art. 53 GPAI provider duties for the other, with an honest gap statement about
+  Arts. 8–17 not being in the corpus (DEVLOG).
+- **Retrieval is untouched and it was proved, not assumed** — the harness
+  returns identical numbers on the changed tree and on a stashed clean one.
+- **Never a gate.** The composer stays live behind the intro block; Skip is
+  remembered. The editor is its own modal because `SettingsModal` only renders
+  when `account` is set — putting it there would have given anonymous visitors
+  a dead button, for the third time in this codebase.
+- `query outcome:` now carries `profile=…`, so **"which sectors ask questions"
+  is countable for the first time** — see the open decision on industries below.
+- `/privacy` updated: the profile is a new stored category, and the page now
+  states that nothing infers a visitor's country from their IP.
+
+**Before deploying:** this adds columns to `users`, so it exercises the exact
+migration path that took the API down on 2026-08-10. They are in the guarded
+`ALTER` list, and the pre-Google regression tests (SQLite + Postgres) now assert
+the profile columns arrive too — but `logs api | head -40` after `up -d` is
+still the check that matters.
+
 ## Open work, in priority order
 
 1. **Billing alerts — still not set.** The one genuinely unbounded risk. A
@@ -279,11 +316,19 @@ no streaming, no i18n, no monitoring.
   Now sharper: the free tier is 10 lifetime questions, so the funnel already
   ends at "add your own key". Stripe is the only alternative to that being the
   permanent answer.
-- **Industries** (long-open) — which sectors matter for Tier-2 sector law. The
-  UI logs each query's industry (`query industry context:`), so usage can answer
-  this — but **how much real traffic exists is itself unconfirmed**, and that
-  line only fires when an industry is set. Check the `query outcome:` count
-  first; it is the only reliable denominator.
+- **Industries** (long-open) — which sectors matter for Tier-2 sector law.
+  **Now actually measurable:** the sector is a fixed enum carried on the
+  unconditional `query outcome:` line, so it aggregates. The old
+  `query industry context:` line was free text and fired only when set, which is
+  why it never answered anything. Once the batch is deployed:
+
+  ```bash
+  docker compose -f docker-compose.prod.yml logs api \
+    | grep -o "sector=[a-z]*" | sort | uniq -c | sort -rn
+  ```
+
+  Still gated on there being real traffic — check the `query outcome:` count
+  first; it remains the only reliable denominator.
 - ~~**`EURAG_FREE_ANON_QUESTIONS`**~~ — decided 2026-08-09: **2**, live.
 - ~~**Google OAuth client id**~~ — supplied 2026-08-10, live and verified.
 

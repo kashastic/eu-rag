@@ -5,6 +5,7 @@ import jwt
 import pytest
 
 from core.db import Database
+from core.profile import BusinessProfile
 from core.security.auth import AuthError, AuthStore, question_hash
 
 SECRET = "x" * 40  # ≥32 bytes, silences the jwt short-key warning
@@ -153,11 +154,16 @@ def test_opening_a_pre_google_database_migrates_instead_of_exploding(tmp_path):
     row = store._db.query_one("SELECT * FROM users WHERE username = 'alice'")
     assert row["google_sub"] is None and row["email"] is None
     assert row["byok_set_at"] is None
+    # every later column arrives the same way — the profile fields are the
+    # newest, so this asserts the whole ALTER chain ran, not just its head
+    assert row["profile_country"] is None and row["profile_ai_role"] is None
     # ...and the new paths work on the migrated table
     principal = store.upsert_google_user("sub-1", "bob@example.com")
     assert principal.username == "bob"
     store.set_byok("alice", "enc-blob")
     assert store.byok_set_at("alice") > 0
+    store.set_profile("alice", BusinessProfile(country="DE", ai_role="provider"))
+    assert store.get_profile("alice").country == "DE"
 
 
 def test_migration_is_idempotent(tmp_path):

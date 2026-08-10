@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from api.deps import current_principal
+from api.routes.query import ProfileBody
 from core.security.auth import Principal
 
 router = APIRouter(tags=["account"])
@@ -45,7 +46,26 @@ def account(request: Request, p: Principal = Depends(current_principal)):
         # when the stored key was set, so the UI can nudge a rotation. Never
         # the key itself.
         "api_key_set_at": auth.byok_set_at(p.username) if (auth and has_key) else None,
+        # the stored business profile, so a user signing in on a second device
+        # gets their context back. The client sends it with each question; the
+        # server does not read it per query.
+        "profile": auth.get_profile(p.username).to_dict() if auth else None,
     }
+
+
+@router.put("/account/profile")
+def set_profile(body: ProfileBody, request: Request, p: Principal = Depends(current_principal)):
+    """Store the asker's business context against the account.
+
+    Not audited: unlike a key change this is neither a security event nor
+    irreversible, and the audit log is deliberately small. It is erased with the
+    account (the fields are columns on `users`).
+    """
+    auth = request.app.state.auth
+    if auth is None:
+        raise HTTPException(status_code=404, detail="auth is disabled on this instance")
+    auth.set_profile(p.username, body.to_profile())
+    return {"profile": body.to_profile().to_dict()}
 
 
 @router.put("/account/api-key")

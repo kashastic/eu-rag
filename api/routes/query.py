@@ -8,7 +8,7 @@ own-key = full cascade billed to them; free = cheap model, no escalation.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from api.deps import (
     allowed_tenants,
@@ -19,10 +19,65 @@ from api.deps import (
     spend_free_question,
 )
 from core.generation.llm_client import LLMUnavailableError
+from core.profile import AI_ROLES, COUNTRIES, SECTORS, SIZES, BusinessProfile
 from core.security import turnstile
 from core.security.auth import Principal, question_hash
 
 router = APIRouter(tags=["query"])
+
+_VOCABULARIES: dict[str, dict[str, str]] = {
+    "country": COUNTRIES,
+    "size": SIZES,
+    "sector": SECTORS,
+    "ai_role": AI_ROLES,
+}
+
+
+class ProfileBody(BaseModel):
+    """The asker's business context, as sent by the client.
+
+    This is the validation boundary that lets `core.profile.describe()` build a
+    sentence for the trusted region of the prompt: every value is checked
+    against a closed vocabulary, so an unknown one is a 422 here and never
+    becomes prompt text. Free text must not be added to this model — see the
+    module docstring in `core/profile.py`.
+
+    All four fields are optional; the intro screen never requires an answer.
+    """
+
+    country: str | None = None
+    size: str | None = None
+    sector: str | None = None
+    ai_role: str | None = None
+
+    @field_validator("country", "size", "sector", "ai_role")
+    @classmethod
+    def _in_vocabulary(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if value is None:
+            return None
+        if value not in _VOCABULARIES[info.field_name]:
+            raise ValueError(f"unknown {info.field_name}")
+        return value
+
+    def to_profile(self) -> BusinessProfile:
+        return BusinessProfile(
+            country=self.country,
+            size=self.size,
+            sector=self.sector,
+            ai_role=self.ai_role,
+        )
+
+
+def profile_of(body: "QueryRequest | object") -> BusinessProfile | None:
+    """The profile carried by a request, or None.
+
+    The request is authoritative even for logged-in users, whose profile is
+    also stored server-side: the client loads the stored copy at startup and
+    sends it back, so there is no per-query database read and no merge rule to
+    get wrong.
+    """
+    sent = getattr(body, "profile", None)
+    return sent.to_profile() if sent is not None else None
 
 
 class HistoryTurn(BaseModel):
@@ -36,7 +91,13 @@ class HistoryTurn(BaseModel):
 
 class QueryRequest(BaseModel):
     question: str = Field(min_length=3, max_length=2000)
-    industry: str | None = Field(default=None, max_length=80)
+    profile: ProfileBody | None = None
+    # Deprecated, and deliberately accepted-but-ignored rather than removed:
+    # tabs open across the deploy still post it, and rejecting it would 422 them
+    # mid-session. It is not forwarded anywhere — free text no longer reaches
+    # the prompt at all, which is the point of replacing it with `profile`.
+    # Remove after one release.
+    industry: str | None = Field(default=None, max_length=80, deprecated=True)
     turnstile_token: str | None = Field(default=None, max_length=2048)
     # Prior turns, oldest first, so a follow-up can be rewritten to stand on
     # its own before retrieval. Sent by the client rather than loaded
@@ -91,7 +152,7 @@ def query(
         try:
             result = pipeline.query(
                 body.question,
-                industry=body.industry,
+                profile=profile_of(body),
                 tenants=["public"],
                 answer_model=settings.llm_model,
                 escalation_model=settings.escalation_model,
@@ -112,7 +173,7 @@ def query(
     try:
         result = pipeline.query(
             body.question,
-            industry=body.industry,
+            profile=profile_of(body),
             tenants=allowed_tenants(request, principal),
             answer_model=plan["answer_model"],
             escalation_model=plan["escalation_model"],

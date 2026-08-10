@@ -32,7 +32,7 @@ numbers is [`docs/DEVLOG.md`](docs/DEVLOG.md); dated decisions and gotchas —
 # env (Python 3.11+; venv already exists at .venv)
 source .venv/bin/activate
 
-# tests — 277 pass / 7 skip, fully offline (hash embedder, no API key needed)
+# tests — 307 pass / 7 skip, fully offline (hash embedder, no API key needed)
 .venv/bin/python -m pytest -q
 EURAG_LIVE_TESTS=1 pytest tests/test_hardening.py -q        # opt-in live LLM test
 EURAG_TEST_DATABASE_URL=postgresql://… pytest tests/test_postgres.py   # opt-in PG parity
@@ -63,12 +63,12 @@ cd frontend/web && npm install && npm run build   # or: npm run dev
 | `core/retrieval/` | `bm25`, `vector_store` (Qdrant), `hybrid_retriever` (RRF + rerank + tenant scope), `reranker`, `expansion` (contextualise + HyDE) |
 | `core/generation/` | `answerer` (cite-or-fail + insufficiency marker), `citations`, `llm_client` |
 | `core/security/` | `auth` (JWT, RBAC, audit), `google_oauth` (ID-token verify), `crypto` (AES-256-GCM), `pii` (upload gate) |
-| `core/` | `pipeline` (wires it together), `registry` (SQLite, tenant+cipher), `db` (SQLite/Postgres), `conversations`, `quota`, `config` |
+| `core/` | `pipeline` (wires it together), `registry` (SQLite, tenant+cipher), `db` (SQLite/Postgres), `conversations`, `quota`, `profile`, `config` |
 | `api/` | `main`, `deps` (auth/tenant/tier), `routes/*`, `middleware/` (ratelimit, headers) |
 | `data/` | `scrapers/` (eurlex, portals, funding_calls, common), `samples/`, `seed.py` |
 | `frontend/static/` | zero-dep chat UI (local single-user mode) |
 | `frontend/web/` | Next.js app (accounts, Google sign-in, saved chats, tiers, `/privacy` + `/terms`) |
-| `tests/` | unit + integration; `test_security`, `test_tiers`, `test_google_signin`, `test_postgres` |
+| `tests/` | unit + integration; `test_security`, `test_tiers`, `test_google_signin`, `test_profile`, `test_postgres` |
 
 ## How it works (the load-bearing bits)
 
@@ -93,7 +93,14 @@ cd frontend/web && npm install && npm run build   # or: npm run dev
 - **Per-query telemetry**: `pipeline.query` emits one `query outcome:` line per
   query — the denominator for escalation rate. `AnswerResult.insufficient_reason`
   records *why* an answer was insufficient (`marker` / `uncited` / `no_sources`);
-  the escalation gate still reads `insufficient` alone.
+  the escalation gate still reads `insufficient` alone. The line also carries
+  `profile=…`, which is what makes "which sectors ask questions" countable.
+- **Business context**: four optional, closed-vocabulary fields (country, size
+  band, sector, AI role) in `core/profile.py`. Offered on the intro screen,
+  stored in `localStorage` for anonymous visitors and on `users` for accounts.
+  It reaches the **answerer only** — retrieval stays blind — as a sentence
+  `describe()` builds from a lookup table. The AI field asks provider vs
+  deployer because that is the distinction the AI Act turns on.
 - **Tenancy**: every chunk has a tenant; `Registry.get_chunks(ids, tenants)` is
   the ONE hard gate. Official corpus = tenant `public`; each user gets a private
   tenant. Isolation is enforced in one place and adversarially tested.
@@ -280,6 +287,29 @@ Full reasoning, symptoms, and the decisions behind them:
   review). The claim the site *can* stand behind is the checkable one already
   on `/privacy`: **no cookies, no tracking, no analytics** — verify it with the
   two curl commands in HANDOFF before touching the frontend.
+- **The business-context fields are a closed vocabulary on purpose.** The
+  sentence they build lands **outside** the `BEGIN SOURCES` fence — the region
+  the model is told to obey — and it is *persistent*, riding every future
+  question including saved chats. The user picks an option; the server writes
+  the sentence (`core/profile.py`). Validation is `ProfileBody` (422 off-list)
+  and `describe()` drops unknown values as a second layer. **Do not add a
+  free-text field to this model** — "describe your business" is the obvious next
+  request and it reopens the whole thing.
+- **Check what a component is gated on before hanging an anonymous control off
+  it.** `SettingsModal` renders only under `{settingsOpen && account && …}`, so
+  putting the profile editor there would have given anonymous visitors — the
+  default path — a button that opens nothing. Same dead-button failure as the
+  `/login` register form and the Turnstile-gated Ask button.
+- **The profile vocabulary lives in THREE places** — `core/profile.py` (the
+  authority), `frontend/web/lib/profile.ts`, and the inline `PROFILE_OPTIONS` in
+  `frontend/static/index.html`. Neither frontend has a build step that catches
+  drift, and a stale value is a 422 the user sees as a dropdown that silently
+  doesn't work. `tests/test_profile.py` parses both frontends and compares.
+  **Changing a value means changing all three.**
+- **`frontend/static/` is a real UI, not a leftover.** It's the local
+  single-user mode, and it posts to the same routes — a request-shape change
+  that only updates `frontend/web/` leaves it sending fields the server has
+  stopped reading.
 - **A user's tenant IS their username**, and the audit log keys on it too — so
   a username is an identifier, not a label. `RESERVED_USERNAMES` (`public`,
   `deleted_account`) is refused by `register` **and** skipped by the
@@ -339,6 +369,26 @@ Standing gaps, in rough priority order:
 6. **`/privacy` and `/terms` publish a real contact address** — changing
    `CONTACT_EMAIL` in `frontend/web/lib/legal.ts`, or letting that mailbox go
    unread, changes what a published legal document promises.
+
+**Visual identity is black ink on bond paper** (`frontend/web/app/globals.css`,
+2026-08-10) — a legal instrument, not an app. Three rules that are load-bearing
+rather than decorative:
+
+- **One accent.** Oxblood `--seal` marks four things only: the masthead star,
+  citation markers + footnotes, the not-legal-advice stamp, destructive actions.
+  A fifth red thing makes the four that matter stop reading as marked.
+- **The home screen demonstrates the product**: the opening statement's citation
+  markers resolve to a rail of three *real* corpus documents. If the corpus ever
+  drops one, the front page is lying — see `OPENING_SOURCES` in `chat/page.tsx`.
+- **Grid tracks are `minmax(0, 1fr)`, never bare `1fr`** — a bare `1fr` floors at
+  min-content, so one nowrap string makes the page wider than a phone. Do not
+  "fix" that class of overflow with `overflow-x: hidden`; it turns it into
+  silent clipping.
+
+**Checking a mobile layout**: headless Chrome's `--window-size` does **not** set
+the layout viewport (it renders at 500px and crops the screenshot), so a fine
+page looks broken. Load the page in a sized `<iframe>` from a wrapper page and
+screenshot that instead — `docs/UPDATE_LOG.md`, 2026-08-10.
 
 **Fonts are self-hosted** (`frontend/web/app/fonts.css` + `public/fonts/`) —
 generated, not hand-written; the header comment says how to refresh them. Do

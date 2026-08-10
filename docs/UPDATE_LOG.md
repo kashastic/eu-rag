@@ -20,6 +20,194 @@ them. Don't paste the same paragraph into three files — link.
 
 ---
 
+## 2026-08-10 (Visual identity — black ink on bond paper)
+
+### [DECISION] The home screen explains the product by behaving like it
+
+Brief was "lawyer theme, black and white paper, and say what this actually is".
+The "what is this" copy is not a pitch paragraph: the opening statement carries
+real superscript citation markers, and they resolve to a rail of three real
+corpus documents (GDPR, AI Act, Late Payment, with their CELEX ids). Hovering or
+tabbing a marker lights its footnote and vice versa — the same apparatus, and
+the same two-way link, that an answer uses.
+
+The point is that EURAG's single claim is *every sentence resolves to a numbered
+article*. A page that asserts that in prose is marketing; a page that does it in
+front of you is evidence. It also means a first-time visitor has already learned
+to read the citation apparatus before they ask anything.
+
+**The three cited documents must stay real.** If the corpus ever drops one, the
+rail is a lie on the front page.
+
+### [DECISION] One accent, and what it is allowed to mark
+
+Palette is bond white `#fbfaf7` / wet black `#0c0c0d` / pencil grey, plus a
+single oxblood `#7b1420`. Seal ink is allowed on exactly four things: the
+masthead star, citation markers and their footnotes, the not-legal-advice
+stamp, and destructive actions. **A fifth red thing makes the four that matter
+stop reading as marked** — the CSS header says so; keep it true.
+
+The stamp is the load-bearing one. Dressing a compliance tool in a law firm's
+clothes raises the odds someone mistakes it for advice, so the disclaimer went
+from a murmured grey line to a bordered, rotated stamp in seal ink. That is a
+design responsibility created by the theme, not decoration.
+
+### [DECISION] Typefaces were fixed before the redesign started
+
+Fraunces / Source Serif 4 / IBM Plex Mono are self-hosted, and adding a fourth
+would mean a font CDN — which would send every visitor's IP to a third party
+and contradict what `/privacy` states in writing. So the identity shift had to
+come from colour, structure and one signature device. Recorded because "the
+display face is a bit generic, let's add one" is the obvious future suggestion
+and it is a privacy regression, not a taste question.
+
+### [GOTCHA] `1fr` grid tracks floor at min-content and blow out mobile
+
+Every content-bearing grid track in `globals.css` is `minmax(0, 1fr)`, never a
+bare `1fr`. A plain `1fr` is `minmax(auto, 1fr)`, and `auto` floors at
+**min-content** — so one `white-space: nowrap` string anywhere inside (the
+masthead badge, a threshold label) sets a floor the column cannot go below, and
+the whole page ends up wider than the phone. The fix is the track definition,
+not `overflow-x: hidden` on an ancestor: that converts an overflow into silent
+clipping, which is harder to notice and looks like a text bug.
+
+### [GOTCHA] Headless Chrome's `--window-size` does not set the layout viewport
+
+`--screenshot` with `--window-size=390,844` produced a 390px-wide *image* of a
+**500px-wide layout**, cropped — so the right-hand side of every element looked
+chopped off and a perfectly fine page looked catastrophically broken on mobile.
+Two rounds of CSS "fixes" went into a bug that did not exist. `--headless=new`
+behaves the same.
+
+**Confirm the viewport before believing a mobile screenshot.** A probe that
+appended `document.documentElement.clientWidth` into the DOM, read back via
+`--dump-dom`, is what settled it: `VW=500 SW=500`, i.e. no overflow at all.
+To actually render at a phone width, load the page in a sized `<iframe>` from a
+wrapper page and screenshot the wrapper — the iframe gets a genuine layout
+viewport. `infra/scripts/` has no tooling for this; it was ad hoc in the
+scratchpad.
+
+### [DECISION] Starters go above the business-context block
+
+Asking is the action on this screen; the profile is an optional refinement.
+With the context block first it pushed the four starter questions off a
+1440x900 laptop screen, which put a form where the primary action belongs.
+
+---
+
+## 2026-08-10 (Business context on the intro screen)
+
+### [DECISION] The asker's context is a closed vocabulary, never free text
+
+**What changed.** The free-text `Industry · optional` box above the composer is
+gone. In its place: four optional dropdowns — country, company size band,
+sector, AI role — offered on the intro screen and stored (`core/profile.py`,
+`frontend/web/lib/profile.ts`).
+
+**Why enums and not a text box, which was less work.** The context sentence is
+injected into the prompt **outside** the `BEGIN SOURCES` fence — i.e. in the
+region `SYSTEM_PROMPT` tells the model to *obey*, as opposed to the sources,
+which it is told to quote and never follow. The old free-text field therefore
+wrote user-authored text straight into the trusted region. It was bounded at 80
+characters and sat next to the question, which is untrusted anyway, so it was
+never dramatic; but the change here makes it **persistent** — set once, then
+attached to every future question including inside saved chats — and a
+persistent injection surface is a different animal from a per-query one.
+
+So the user picks an option and **the server writes the sentence**. Validation
+is `api.routes.query.ProfileBody` (422 on anything off-list); `describe()` in
+`core/profile.py` silently drops unrecognised values as a second layer, so a
+value that somehow got past the boundary still cannot reach a prompt. There is a
+test for exactly that (`tests/test_answerer.py`), and one asserting the sentence
+lands after `END SOURCES`.
+
+**Do not add a free-text field to this model.** "Describe your business" is the
+obvious next request and it reopens the whole thing.
+
+### [DECISION] The AI field asks for the *role*, not for usage
+
+`none` / `deployer` / `provider`, not a yes/no. Provider vs deployer is the
+load-bearing distinction in the AI Act (Reg. 2024/1689, `32024R1689`, in the
+corpus): a business using someone else's AI tool and a business putting its name
+on one have obligations that differ by an order of magnitude. A boolean cannot
+separate them, so it could not change an answer usefully — it would have been a
+survey question rather than a retrieval-relevant one. The fragment uses the
+Act's own vocabulary so the model can connect it to the Art. 3 definitions when
+they are retrieved, and deliberately does **not** assert what either role owes.
+
+### [DECISION] Context reaches the answerer only — retrieval stays blind
+
+`pipeline._answer` passes the profile to `answer_question` and **not** to
+`retriever.retrieve`, keeping the boundary that was already there for
+`industry`. Folding country/sector terms into the query before BM25 is
+plausible — national funding questions would likely benefit — but it is a
+retrieval change, so standing rule 1 binds, and the golden set has **zero**
+context-conditioned cases to measure it with. Building the eval is the
+prerequisite, not an afterthought. Harness numbers are unchanged by this batch
+because the harness sends no profile: same prompt, byte for byte.
+
+### [DECISION] `describe()` warns the model off concluding size from headcount
+
+The size bands are headcount-only, but the EU SME definition (Rec. 2003/361)
+also turns on turnover and balance-sheet totals, and so do CSRD and NIS2. A
+prompt that says "a small business (10-49 people)" and stops there invites the
+model to conclude an SME exemption applies. The fragment therefore carries an
+explicit "headcount alone does not settle it", alongside the more general "this
+is not evidence; never state an obligation applies unless a cited source
+supports it" and "if the sources do not answer the question for this asker, say
+so". That last clause protects the `INSUFFICIENT_SOURCES` path: the profile must
+never talk the model out of an honest refusal.
+
+### [GOTCHA] The settings dialog only renders when `account` is set
+
+The obvious place for the profile editor was `SettingsModal`, which is gated on
+`{settingsOpen && account && …}` — so for an **anonymous** visitor, the natural
+default here, the edit button would have opened nothing at all. That is the same
+dead-button failure as the `/login` register form and the Turnstile-gated Ask
+button, for the third time. The profile editor is therefore its own modal,
+rendered regardless of auth state. **Check what a component is gated on before
+hanging an anonymous-reachable control off it.**
+
+### [DECISION] The intro block is offered, never a gate
+
+It renders above the starter cards, the composer stays enabled behind it, every
+field is optional, and Skip is remembered. EURAG is anonymous-first on purpose;
+a wizard in front of the first question is the same mistake the always-visible
+Turnstile checkbox was, in new clothing.
+
+### [DECISION] `query outcome:` carries the profile; the old industry line is gone
+
+`query industry context:` fired only when an industry was set, which made it
+useless as a denominator. The profile now rides `query outcome:` — the one
+unconditional per-query line — as `profile=country=DE,size=small,…` (ASCII, no
+spaces, greppable). This is the first time HANDOFF's long-open *"which sectors
+matter for Tier-2 sector law"* question is actually countable: free text never
+aggregated, enums do.
+
+**Wire compatibility:** `industry` is still accepted on both ask routes and is
+**not forwarded anywhere**. Tabs open across the deploy would otherwise 422
+mid-session. Remove after one release.
+
+### [GOTCHA] `frontend/static/` posts to the same routes and was not in the plan
+
+The plan covered `frontend/web/` and forgot the zero-dep static UI, which is
+the local single-user mode and posts to `/query` directly. Because `industry` is
+accepted-and-ignored, nothing broke loudly — the static UI would simply have
+kept a visible "Your industry" box that the server had quietly stopped reading.
+A dead control that looks alive is worse than a 422. It now ships the same four
+dropdowns.
+
+**The vocabulary therefore lives in three places** — `core/profile.py` (the
+authority), `frontend/web/lib/profile.ts`, and the inline `PROFILE_OPTIONS` in
+`frontend/static/index.html` — and **neither frontend has a build step that
+would catch drift**: a stale value is a 422 the user experiences as a dropdown
+that doesn't work. `tests/test_profile.py` parses both frontends and compares
+against the server's vocabulary. That test was verified by injecting a drifted
+value and watching it fail, because a comparison test that silently matches
+nothing is decoration.
+
+---
+
 ## 2026-08-10 (Privacy notice, terms, self-service erasure)
 
 ### [DECISION] No cookie banner — because there is nothing to consent to

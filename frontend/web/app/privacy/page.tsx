@@ -38,11 +38,19 @@ export default function Privacy() {
       <p>
         EURAG sets no cookies. There is no analytics product, no advertising
         network, and no third-party tracker on this site — which is why you are
-        not being asked to accept anything. The only data kept in your browser
-        is your sign-in token, held in <code>localStorage</code> so that you
-        stay signed in; signing out deletes it. Cloudflare and Google may use
-        their own storage when their scripts run — see{" "}
-        <a href="#third-parties">who else sees your data</a>.
+        not being asked to accept anything. What is kept in your browser is your
+        sign-in token, held in <code>localStorage</code> so that you stay signed
+        in, and the business context you optionally set (country, company size,
+        sector, whether you use AI). Signing out deletes the token; the context
+        is cleared with your browser data, and if you have an account you can
+        also clear it by setting each field back to &ldquo;No answer&rdquo;.
+        Cloudflare and Google may use their own storage when their scripts run —
+        see <a href="#third-parties">who else sees your data</a>.
+      </p>
+      <p>
+        We do not guess any of that context. Nothing here infers your country
+        from your IP address or from anything else — if a field is not set, it is
+        simply not used.
       </p>
 
       <h2>What is stored on the server</h2>
@@ -89,6 +97,19 @@ export default function Privacy() {
             <td>Your saved chats — questions and answers</td>
             <td>So you can come back to them</td>
             <td>Until you delete the chat or the account</td>
+          </tr>
+          <tr>
+            <td>
+              Your business context, if you set it — country, company size band,
+              sector, and whether you use or build AI
+            </td>
+            <td>
+              To point answers at the thresholds that apply to you. Sent with
+              each question, so it reaches Anthropic like the question does.
+              Only stored on the server if you have an account; otherwise it
+              stays in your browser
+            </td>
+            <td>Until you clear it or delete the account</td>
           </tr>
           <tr>
             <td>Your Anthropic API key, if you add one</td>
@@ -163,8 +184,9 @@ export default function Privacy() {
       <p>
         Sign in, open <em>Your Anthropic key</em> from the sidebar, and use{" "}
         <strong>Delete account</strong>. It removes your account, your saved
-        chats, any document you uploaded, your stored API key, and your free-tier
-        counter, immediately and irreversibly. The security log survives with
+        chats, any document you uploaded, your stored API key, your business
+        context, and your free-tier counter, immediately and irreversibly. The
+        security log survives with
         your username stripped out, so that deleting an account cannot be used
         to erase evidence of an attack on someone else&apos;s.
       </p>

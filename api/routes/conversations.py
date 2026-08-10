@@ -11,6 +11,7 @@ from api.deps import (
     refund_free_question,
     spend_free_question,
 )
+from api.routes.query import ProfileBody, profile_of
 from core.generation.llm_client import LLMUnavailableError
 from core.security.auth import Principal, question_hash
 
@@ -27,7 +28,12 @@ class Rename(BaseModel):
 
 class Ask(BaseModel):
     question: str = Field(min_length=3, max_length=2000)
-    industry: str | None = Field(default=None, max_length=80)
+    # the profile must reach BOTH logged-in ask paths — this one and /query —
+    # or the web app's saved chats silently lose the tailoring that the
+    # anonymous thread has
+    profile: ProfileBody | None = None
+    # deprecated alongside QueryRequest.industry; accepted, never forwarded
+    industry: str | None = Field(default=None, max_length=80, deprecated=True)
 
 
 def _store(request: Request):
@@ -106,7 +112,7 @@ def ask(conv_id: str, body: Ask, request: Request, p: Principal = Depends(curren
     try:
         result = request.app.state.pipeline.query(
             body.question,
-            industry=body.industry,
+            profile=profile_of(body),
             tenants=tenants,
             answer_model=plan["answer_model"],
             escalation_model=plan["escalation_model"],

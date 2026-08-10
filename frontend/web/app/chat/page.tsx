@@ -19,6 +19,9 @@ import {
   type TurnstileHandle,
 } from "@/components/Turnstile";
 import { GoogleSignIn } from "@/components/GoogleSignIn";
+import { ProfileFields, ProfileIntro, ProfileSummary } from "@/components/ProfileFields";
+import * as profileStore from "@/lib/profile";
+import { type Profile } from "@/lib/profile";
 
 const STARTERS = [
   "Do I need a data protection officer for a 30-person company?",
@@ -49,11 +52,21 @@ export default function ChatPage() {
 
   const [pending, setPending] = useState(false);
   const [question, setQuestion] = useState("");
-  const [industry, setIndustry] = useState("");
+  // Business context. Read from localStorage on mount (never during render —
+  // the server has no localStorage and the markup must match), then overwritten
+  // by the account's stored copy if there is one, so a second device recovers
+  // it. Sent with every question; the server never looks it up per query.
+  const [profile, setProfile] = useState<Profile>(profileStore.EMPTY_PROFILE);
+  // Decided once, at load, and NOT derived from `profile` being empty — that
+  // would tear the block off the screen the moment the first dropdown was set,
+  // leaving the other three unreachable. Starts false so it can't flash before
+  // init has read localStorage.
+  const [showIntro, setShowIntro] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   const [loginForced, setLoginForced] = useState(false);
   const [loginMode, setLoginMode] = useState<"login" | "register">("login");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const threadRef = useRef<HTMLDivElement>(null);
 
   const init = useCallback(async () => {
@@ -63,12 +76,23 @@ export default function ChatPage() {
       setSitekey(health.turnstile_sitekey ?? null);
       setGoogleClientId(health.google_client_id ?? null);
     }
+    const local = profileStore.load();
+    setProfile(local);
+    setShowIntro(!profileStore.isDismissed() && profileStore.isEmpty(local));
     if (getToken()) {
       try {
         const [acct, list] = await Promise.all([api.account(), api.listChats()]);
         setAccount(acct);
         setChats(list.conversations);
         setAuthed(true);
+        // the account's copy wins on a fresh device, but an empty stored
+        // profile must not wipe one the visitor set before signing in
+        if (acct.profile && !profileStore.isEmpty(acct.profile)) {
+          setProfile(acct.profile);
+          profileStore.save(acct.profile);
+        } else if (!profileStore.isEmpty(local)) {
+          api.saveProfile(local).catch(() => {});
+        }
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) clearTokens();
         setAuthed(false);
@@ -91,6 +115,7 @@ export default function ChatPage() {
   useEffect(() => {
     init();
   }, [init]);
+
 
   useEffect(() => {
     threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight, behavior: "smooth" });
@@ -132,6 +157,20 @@ export default function ChatPage() {
     await refreshList();
   }
 
+  // one writer for the profile: local first (so it survives a reload even when
+  // the account call fails), then best-effort to the account. A failed sync
+  // must never block asking a question, so it is deliberately not awaited.
+  function updateProfile(next: Profile) {
+    setProfile(next);
+    profileStore.save(next);
+    if (authed) api.saveProfile(next).catch(() => {});
+  }
+
+  function skipProfile() {
+    profileStore.dismiss();
+    setShowIntro(false);
+  }
+
   async function send(text: string) {
     const q = text.trim();
     if (!q || pending) return;
@@ -153,7 +192,12 @@ export default function ChatPage() {
         const token = sitekey ? await tsRef.current?.getToken() : undefined;
         // anonMsgs here is still the pre-question state, which is exactly the
         // history to resolve this follow-up against
-        const ans = await api.queryAnon(q, industry || undefined, token, toHistory(anonMsgs));
+        const ans = await api.queryAnon(
+          q,
+          profileStore.forRequest(profile),
+          token,
+          toHistory(anonMsgs)
+        );
         setAnonMsgs((m) => [...m, answerToMsg(ans)]);
         if (typeof ans.anon_remaining === "number") setAnonRemaining(ans.anon_remaining);
       } catch (err) {
@@ -180,7 +224,7 @@ export default function ChatPage() {
     setActive({ ...chat, messages: [...chat.messages, userMsg] });
     setPending(true);
     try {
-      const ans = await api.ask(chat.id, q, industry || undefined);
+      const ans = await api.ask(chat.id, q, profileStore.forRequest(profile));
       setActive((cur) => (cur ? { ...cur, messages: [...cur.messages, answerToMsg(ans)] } : cur));
       if (typeof ans.free_remaining === "number") {
         setAccount((a) => (a ? { ...a, free_remaining: ans.free_remaining! } : a));
@@ -259,8 +303,13 @@ export default function ChatPage() {
 
       <main className="pane">
         <div className="pane-head">
-          <span>{authed ? (active ? active.title : "New chat") : "EU SME Intelligence Hub"}</span>
-          <span className="badge">{documents} official texts indexed</span>
+          <span>{authed ? (active ? active.title : "New chat") : "EURAG"}</span>
+          <span className="badge">
+            {documents > 0 && <>{documents} official texts</>}
+            <span className="tagline">
+              {documents > 0 ? " · " : ""}every claim cited
+            </span>
+          </span>
         </div>
 
         {authed && account?.tier === "free" && (
@@ -286,12 +335,28 @@ export default function ChatPage() {
           <div className="thread-inner">
             {empty ? (
               <div className="empty">
-                <p className="lede">Ask anything an EU regulation should answer.</p>
-                <div className="cards">
-                  {STARTERS.map((s) => (
-                    <button key={s} onClick={() => send(s)}>{s}</button>
-                  ))}
+                <Opening documents={documents} />
+                {/* Starters before the context block on purpose: asking is the
+                    thing to do here, and the profile is an optional refinement.
+                    Above the starters it pushed them off a laptop screen, which
+                    put a form where the primary action should be. */}
+                <div className="starters">
+                  <div className="starters-label">Start with one of these</div>
+                  <div className="cards">
+                    {STARTERS.map((s) => (
+                      <button key={s} onClick={() => send(s)}>{s}</button>
+                    ))}
+                  </div>
                 </div>
+                {/* Never in the way: the composer stays enabled throughout, so
+                    a visitor who ignores this entirely loses nothing. */}
+                {showIntro && (
+                  <ProfileIntro
+                    profile={profile}
+                    onChange={updateProfile}
+                    onSkip={skipProfile}
+                  />
+                )}
               </div>
             ) : (
               messages.map((m, i) => <Message key={i} msg={m} />)
@@ -311,14 +376,13 @@ export default function ChatPage() {
               <Turnstile ref={tsRef} sitekey={sitekey} onInteractive={setChallenging} />
             )}
             <div className="industry-row">
-              <label htmlFor="ind">Industry · optional</label>
-              <input
-                id="ind"
-                value={industry}
-                onChange={(e) => setIndustry(e.target.value)}
-                placeholder="e.g. software, food, manufacturing…"
-                maxLength={80}
-              />
+              {profileStore.isEmpty(profile) ? (
+                <button className="profile-open" onClick={() => setProfileOpen(true)}>
+                  + Add your business context
+                </button>
+              ) : (
+                <ProfileSummary profile={profile} onEdit={() => setProfileOpen(true)} />
+              )}
               {!authed && anonRemaining !== null && (
                 <span className="anon-left">{anonRemaining} free question{anonRemaining === 1 ? "" : "s"} left</span>
               )}
@@ -342,9 +406,12 @@ export default function ChatPage() {
             </div>
             {/* the disclaimer is on every screen anonymous or not, so it is
                 also where the legal pages hang — no separate footer needed */}
+            {/* Borrowing a law firm's clothes raises the stakes on this line,
+                so it is stamped rather than murmured. */}
             <p className="disclaimer">
-              Information, <a href="/terms">not legal advice</a> · every claim links to an
-              official source · <a href="/privacy">privacy</a>
+              <a href="/terms" className="stamp">Not legal advice</a>
+              <span>Every claim links to an official source</span>
+              <a href="/privacy">Privacy</a>
             </p>
           </div>
         </div>
@@ -360,6 +427,17 @@ export default function ChatPage() {
           onSuccess={onLoggedIn}
         />
       )}
+      {/* Not folded into SettingsModal on purpose: that one only renders when
+          `account` is set, so an anonymous visitor clicking "edit" would have
+          got a dead button — and anonymous is the default path here. One
+          dialog, reachable in both states, one copy of the state. */}
+      {profileOpen && (
+        <ProfileModal
+          profile={profile}
+          onChange={updateProfile}
+          onClose={() => setProfileOpen(false)}
+        />
+      )}
       {settingsOpen && account && (
         <SettingsModal
           account={account}
@@ -373,6 +451,128 @@ export default function ChatPage() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+/** Three real documents from the corpus, cited by the opening statement.
+ *  They have to be real: the point of the rail is that it behaves exactly like
+ *  the citation block under an answer, so a visitor learns the apparatus before
+ *  they have asked anything. CELEX ids are the corpus's own identifiers. */
+const OPENING_SOURCES = [
+  {
+    doc: "Regulation (EU) 2016/679",
+    name: "General Data Protection Regulation",
+    celex: "32016R0679",
+  },
+  {
+    doc: "Regulation (EU) 2024/1689",
+    name: "Artificial Intelligence Act",
+    celex: "32024R1689",
+  },
+  {
+    doc: "Directive 2011/7/EU",
+    name: "Late payment in commercial transactions",
+    celex: "32011L0007",
+  },
+];
+
+/** The home screen explains what EURAG is by demonstrating it: the statement
+ *  carries citation markers, and they resolve. Hovering or tabbing a marker
+ *  lights its footnote, and hovering a footnote lights its marker — the same
+ *  two-way link the answers use. */
+function Opening({ documents }: { documents: number }) {
+  const [active, setActive] = useState<number | null>(null);
+
+  const ref = (n: number) => (
+    <button
+      type="button"
+      className={"ref" + (active === n ? " on" : "")}
+      aria-describedby={`fn-${n}`}
+      onMouseEnter={() => setActive(n)}
+      onMouseLeave={() => setActive(null)}
+      onFocus={() => setActive(n)}
+      onBlur={() => setActive(null)}
+    >
+      {n}
+    </button>
+  );
+
+  return (
+    <section className="opening">
+      <div className="opening-statement">
+        <h1 className="statement">
+          Every claim points to an article — <em>or it isn&apos;t made.</em>
+        </h1>
+        <p className="standfirst">
+          EURAG answers compliance and funding questions for small businesses in
+          the EU. Ask in plain language and get back an answer where every
+          sentence resolves to a numbered article in an official text — the
+          GDPR{ref(1)}, the AI Act{ref(2)}, the late-payment rules{ref(3)}
+          {/* The count is only stated when we actually have it. A failing
+              /healthz reports 0, and "0 documents in all" set in the opening
+              sentence is a far worse failure than a blank counter. */}
+          {documents > 0 && (
+            <>
+              {" "}&mdash; <strong>{documents} documents in all</strong>
+            </>
+          )}
+          . When the corpus doesn&apos;t cover your question, it says so instead
+          of guessing.
+        </p>
+        <p className="standfirst">
+          It is a research tool, not a lawyer. It shows you the text and where it
+          came from; what you do with that is your call.
+        </p>
+      </div>
+
+      <aside className="footnotes">
+        <div className="footnotes-label">Cited above</div>
+        {OPENING_SOURCES.map((s, i) => (
+          <div
+            key={s.celex}
+            id={`fn-${i + 1}`}
+            className={"footnote" + (active === i + 1 ? " on" : "")}
+            onMouseEnter={() => setActive(i + 1)}
+            onMouseLeave={() => setActive(null)}
+          >
+            <span className="n">{i + 1}</span>
+            <span>
+              <span className="doc">{s.doc}</span>
+              {s.name}
+              <br />
+              <span className="celex">CELEX {s.celex}</span>
+            </span>
+          </div>
+        ))}
+      </aside>
+    </section>
+  );
+}
+
+function ProfileModal({
+  profile,
+  onChange,
+  onClose,
+}: {
+  profile: Profile;
+  onChange: (next: Profile) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="auth-card modal" onClick={(e) => e.stopPropagation()}>
+        <h2>Your business context</h2>
+        <p className="muted">
+          Every field is optional. EURAG uses this to work out which thresholds
+          in the sources apply to you — it never invents an obligation the
+          sources don&apos;t support.
+        </p>
+        <ProfileFields profile={profile} onChange={onChange} />
+        <button className="btn" onClick={onClose}>
+          Done
+        </button>
+      </div>
     </div>
   );
 }

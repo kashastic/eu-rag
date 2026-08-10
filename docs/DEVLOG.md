@@ -2,6 +2,97 @@
 
 Running log of build sessions. Newest first.
 
+## 2026-08-10 (visual identity) — black ink on bond paper
+
+Redesigned to a legal-instrument look: bond white, wet black, hairline and
+double rules, zero border-radius, and one oxblood used as seal ink. The warm
+cream / navy / gold editorial palette is gone. Decisions and the two traps this
+cost time on: `docs/UPDATE_LOG.md`.
+
+**The signature** is the opening statement's footnote rail. The home screen says
+what EURAG is by behaving like an EURAG answer — real citation markers in the
+prose, resolving to three real corpus documents with their CELEX ids, linked
+both ways on hover and focus. Same apparatus the transcript uses, so a visitor
+learns to read a citation before asking anything.
+
+**Verified by rendering, not by reading CSS** — headless Chrome screenshots at
+1440x900, 390 and 360, plus a static harness for the transcript (answer,
+flags, sources) which is otherwise only reachable by spending an LLM call.
+That is how three real bugs surfaced: the composer placeholder clipping on a
+one-row textarea, a stray `·` in front of a lone flag, and the starter
+questions being pushed off a laptop screen by the context block above them.
+`/privacy` and `/terms` inherit the tokens and needed no markup changes.
+
+**Robustness found while shooting it:** the hero sentence stated the corpus size,
+and a failing `/healthz` reports 0 — so the opening line read "0 documents in
+all", which is a worse failure than the blank counter the old design showed. The
+count clause is now omitted entirely unless the number is known. Confirmed by
+accident (CORS blocked the local health call) and kept as designed behaviour.
+
+## 2026-08-10 (business context) — asking who is asking
+
+Most EU obligations are threshold functions — of headcount, of member state, of
+whether you build an AI system or merely use one — and EURAG collected almost
+none of that. The one input it had was a free-text `Industry · optional` box
+above the composer: per-query, ephemeral, gone on reload. So "do I need a DPO?"
+was answered generically when the 250-employee line in GDPR Art. 30(5) would
+have settled it. Decisions and the do-not-reverse notes: `docs/UPDATE_LOG.md`.
+
+**Shipped**
+
+- `core/profile.py` — four optional, closed-vocabulary fields (country, size
+  band, sector, AI role) and the `describe()` sentence built from them. The
+  vocabulary is mirrored for display in `frontend/web/lib/profile.ts`.
+- Offered on the intro screen above the starter cards, **never a gate**: the
+  composer stays live, every field is optional, Skip is remembered. Collapses
+  to a one-line summary above the composer once set.
+- Stored in `localStorage` for anonymous visitors; on `users` for accounts
+  (`GET /account`, `PUT /account/profile`), so a second device recovers it.
+- Accepted on **both** logged-in ask paths and carried through the escalation
+  retry. `query outcome:` now ends `profile=country=DE,size=small,…`.
+- The free-text `industry` field is gone from **both** UIs — the Next app and
+  the static local one — and no longer reaches any prompt; the wire field is
+  still accepted, unused, for one release. The static UI was not in the plan and
+  would otherwise have kept a visible box the server had started ignoring.
+
+**Numbers**
+
+- Retrieval: **unchanged, and proved so.** `EURAG_HYDE_MODEL=none python -m
+  core.evaluation.harness` on the changed tree and on a stashed clean tree both
+  return `k=6 cases=32 doc_hit=100% doc_mrr=1.00 phrase_hit=94%
+  compound_hit=67%` — identical, because the profile reaches the answerer only
+  and the harness sends none. (The `compound_hit=100%` figure recorded for M2
+  was a 29-case set; this is 32 cases with HyDE pinned off. Not a regression
+  from this batch — the stashed run is the control.)
+- Tests **277 → 307** (+30), 7 skipped. New: `tests/test_profile.py` (27),
+  profile cases in `tests/unit/test_answerer.py`, and profile assertions folded
+  into the existing pre-Google migration regressions (SQLite + Postgres).
+- Three UIs now mirror one vocabulary (`core/profile.py`,
+  `frontend/web/lib/profile.ts`, and the inline JS in
+  `frontend/static/index.html`), and **neither frontend has a build step that
+  would catch drift** — a stale value is a 422 the user experiences as a
+  dropdown that silently doesn't work. Parametrised tests parse both frontends
+  and compare against the server's vocabulary; verified failing by injecting a
+  drifted value, because a test that cannot fail is decoration.
+- Cost: **zero extra LLM calls.** The profile is an enum formatted by a lookup
+  table, not something a model interprets.
+
+**Does it actually change an answer?** Worth checking rather than assuming, so:
+same question (*"What are my obligations under the EU AI Act?"*), same
+retrieval, three profiles.
+
+- `ai_role=deployer` → Art. 26 deployer duties: DPIA via Art. 13/35, informing
+  workers under Directive 2002/14/EC, transparency toward affected persons.
+- `ai_role=provider` → states that the deployer obligations in the sources do
+  **not** apply to a provider, pivots to Art. 53 GPAI provider duties, and
+  flags that Arts. 8–17 are not in the corpus.
+- no profile → "it depends on your role (provider, deployer, importer…)".
+
+The guardrail held: the provider answer noted the sources don't state the
+distinction beyond defining deployers, instead of asserting law the corpus
+doesn't carry. That is the behaviour `describe()`'s "this is not evidence"
+clause exists to produce.
+
 ## 2026-08-10 (privacy) — the paperwork, and the erasure it promises
 
 Started from a question — *every site asks for cookie consent, why don't we?* —

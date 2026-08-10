@@ -29,6 +29,7 @@ from pathlib import Path
 import jwt
 
 from core.db import Database
+from core.profile import BusinessProfile
 from core.registry import PUBLIC_TENANT
 
 logger = logging.getLogger(__name__)
@@ -63,7 +64,11 @@ CREATE TABLE IF NOT EXISTS users (
     byok_key_enc TEXT,
     byok_set_at  DOUBLE PRECISION,
     google_sub   TEXT,
-    email        TEXT
+    email        TEXT,
+    profile_country TEXT,
+    profile_size    TEXT,
+    profile_sector  TEXT,
+    profile_ai_role TEXT
 );
 CREATE TABLE IF NOT EXISTS refresh_tokens (
     jti        TEXT PRIMARY KEY,
@@ -145,6 +150,14 @@ class AuthStore:
             "ALTER TABLE users ADD COLUMN byok_set_at DOUBLE PRECISION",
             "ALTER TABLE users ADD COLUMN google_sub TEXT",
             "ALTER TABLE users ADD COLUMN email TEXT",
+            # business profile — four closed-vocabulary fields, all nullable.
+            # Columns on `users` rather than a side table so that erase_user
+            # takes them with the row and the deletion ordering in
+            # DELETE /account needs no new step.
+            "ALTER TABLE users ADD COLUMN profile_country TEXT",
+            "ALTER TABLE users ADD COLUMN profile_size TEXT",
+            "ALTER TABLE users ADD COLUMN profile_sector TEXT",
+            "ALTER TABLE users ADD COLUMN profile_ai_role TEXT",
             # NULLs don't collide in a unique index on either backend, so
             # password-only accounts are unaffected
             "CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users (google_sub)",
@@ -420,6 +433,48 @@ class AuthStore:
             "SELECT byok_set_at FROM users WHERE username = ?", (username,)
         )
         return row["byok_set_at"] if row else None
+
+    # --- business profile ----------------------------------------------------
+
+    def get_profile(self, username: str) -> BusinessProfile:
+        """The stored profile, or an empty one. Never raises for a missing user
+        — callers are already authenticated, and an empty profile is a valid
+        state anyway."""
+        row = self._db.query_one(
+            "SELECT profile_country, profile_size, profile_sector, profile_ai_role"
+            " FROM users WHERE username = ?",
+            (username,),
+        )
+        if row is None:
+            return BusinessProfile()
+        return BusinessProfile(
+            country=row["profile_country"],
+            size=row["profile_size"],
+            sector=row["profile_sector"],
+            ai_role=row["profile_ai_role"],
+        )
+
+    def set_profile(self, username: str, profile: BusinessProfile) -> None:
+        """Overwrite the stored profile wholesale. The client always sends all
+        four fields (any of them null), so there is no partial-update rule to
+        get wrong — clearing a field is sending it as null.
+
+        Values are NOT validated here: they arrive from `ProfileBody`, which is
+        the vocabulary boundary. `BusinessProfile.describe()` skips anything it
+        does not recognise, so a value that somehow got past validation still
+        cannot reach a prompt."""
+        with self._db.transaction() as tx:
+            tx.execute(
+                "UPDATE users SET profile_country = ?, profile_size = ?,"
+                " profile_sector = ?, profile_ai_role = ? WHERE username = ?",
+                (
+                    profile.country,
+                    profile.size,
+                    profile.sector,
+                    profile.ai_role,
+                    username,
+                ),
+            )
 
     # --- audit ---------------------------------------------------------------
 
