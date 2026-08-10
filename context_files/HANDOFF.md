@@ -1,13 +1,20 @@
 # HANDOFF — continue here
 
 **As of:** 2026-08-10 · **EURAG is LIVE** at <https://eurag.duckdns.org> ·
-prod runs `15cbfc0` · **307 tests pass, 7 skipped** locally.
+prod runs `15cbfc0` · **308 tests pass, 7 skipped** locally.
 
-> **Uncommitted and not yet deployed:** the business-context batch (intro-screen
-> profile — country / size / sector / AI role). Backend, frontend, tests, and
-> `/privacy` are done and verified locally; nothing is on prod. See *What
-> shipped 2026-08-10 (business context)* below and `docs/DEVLOG.md` for the
-> numbers.
+> **Pushed, not yet deployed.** `f267bfb` on `origin/main` carries the
+> business-context batch (intro-screen profile) **and** the black-and-white
+> redesign. Verified locally: full suite green, Postgres migration suite run
+> against a real Postgres from the exact schema prod is on, web build clean,
+> rendered at 1440/390/360. Run the update path below to put it live, then
+> delete this box.
+>
+> **What to watch on this deploy:** it adds four columns to `users`, so it walks
+> the migration path that took the API down on 2026-08-10. Check
+> `logs api | head -40` and confirm `/healthz` reports `documents: 47` before
+> calling it done — a failed migration shows up as **0 documents** in the UI,
+> not as an error.
 
 Read [`CLAUDE.md`](../CLAUDE.md) first for standing rules — it wins on *how to
 work here*; this file wins on *what is true right now*. Build history with
