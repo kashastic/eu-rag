@@ -3,18 +3,31 @@
 **As of:** 2026-08-10 · **EURAG is LIVE** at <https://eurag.duckdns.org> ·
 prod runs `15cbfc0` · **322 tests pass, 8 skipped** locally.
 
-> **Pushed, not yet deployed.** `f267bfb` on `origin/main` carries the
-> business-context batch (intro-screen profile) **and** the black-and-white
-> redesign. Verified locally: full suite green, Postgres migration suite run
-> against a real Postgres from the exact schema prod is on, web build clean,
-> rendered at 1440/390/360. Run the update path below to put it live, then
-> delete this box.
+> **Four commits pushed, none deployed.** Prod is still on `15cbfc0`;
+> `origin/main` is at `a0a6cec`. Everything below goes live in one deploy:
+>
+> | | |
+> |---|---|
+> | `f267bfb` | business context on the intro screen **+** the black-and-white redesign |
+> | `43b8899` | docs |
+> | `0cafd3a` | **fix:** signing in destroyed the anonymous conversation |
+> | `a0a6cec` | **fix:** a long previous answer 422'd the third question in a thread |
+>
+> Verified locally: 322 pass / 8 skip, web build clean, rendered at 1440/390/360,
+> and the Postgres migration suite run against a real Postgres **from the exact
+> schema prod is on**. Run the update path below, then delete this box.
 >
 > **What to watch on this deploy:** it adds four columns to `users`, so it walks
 > the migration path that took the API down on 2026-08-10. Check
 > `logs api | head -40` and confirm `/healthz` reports `documents: 47` before
 > calling it done — a failed migration shows up as **0 documents** in the UI,
 > not as an error.
+>
+> **Then check by hand**, because neither could be verified from a dev machine:
+> ask two questions anonymously to trigger the wall, sign in with Google, and
+> confirm the thread survived and a follow-up still understands it; then run a
+> thread four questions deep and confirm no validation error appears where an
+> answer should be.
 
 Read [`CLAUDE.md`](../CLAUDE.md) first for standing rules — it wins on *how to
 work here*; this file wins on *what is true right now*. Build history with
@@ -238,7 +251,54 @@ against the real processing, and chat retention is "until you delete it" rather
 than a policy. The safe public phrasing is the one already on the page: *no
 cookies, no tracking, no analytics*, which is checkable.
 
-## What shipped 2026-08-10 (business context) — local only, not deployed
+## What shipped 2026-08-10 (session 3) — pushed, NOT deployed
+
+Reasoning for all of it in [`docs/UPDATE_LOG.md`](../docs/UPDATE_LOG.md);
+numbers and screenshots in [`docs/DEVLOG.md`](../docs/DEVLOG.md).
+
+### Two bugs found by using it
+
+Both were **pre-existing and live** — neither came from this session's work.
+
+1. **Signing in destroyed the anonymous conversation.** `onLoggedIn` called
+   `setAnonMsgs([])`, and the thread lived only in client state. The login wall
+   is raised *by* `anonymous_limit_reached`, so sign-up happened at exactly the
+   moment the visitor had a conversation worth keeping. Reported against Google
+   sign-in, but `onSuccess` is shared — the password path did it too.
+   **`POST /conversations/import`** now adopts the turns verbatim before the
+   state is cleared: no model call, no quota spend (those answers were already
+   paid for on the anonymous tier, and it is what stops the route being a
+   free-answer path). Because the turns are stored, `_history()` picks them up,
+   so the thread is *continuable*, not just visible.
+2. **The third question in a thread returned a validation error.**
+   `422 answer: String should have at most 2000 characters`, rendered in the
+   transcript where the answer belongs. `/query` is stateless so the client
+   sends prior turns, and `HistoryTurn` used `max_length`, which **rejects** —
+   over EURAG's *own previous answer*, and ahead of the quota check, because
+   request validation runs before the route body. Prior turns are truncated now.
+   Nothing is lost: the contextualiser reads at most 400 chars of an answer, so
+   the API was refusing requests over text the pipeline would have sliced off.
+   `test_query_rejects_oversize_history` had asserted the 2001-char rejection —
+   it had locked the bug in — and is rewritten with a note not to restore it.
+
+### The redesign
+
+Black ink on bond paper, styled as a legal instrument. The signature is the
+opening statement's **footnote rail**: real citation markers in the prose
+resolving to three real corpus documents with their CELEX ids, linked both ways
+on hover and focus — the same apparatus an answer uses, so the home screen
+explains the product by behaving like it. One accent (oxblood) marks four things
+only: masthead star, citations, the not-legal-advice stamp, destructive actions.
+
+Typefaces are unchanged and must stay that way — adding one means a font CDN,
+which `/privacy` rules out in writing.
+
+Verified by rendering at 1440/390/360, which is how three bugs surfaced (clipped
+composer placeholder, a stray separator on a lone flag, starters pushed off a
+laptop screen). **`OPENING_SOURCES` in `chat/page.tsx` must stay real** — if the
+corpus drops one of those three acts, the front page is lying.
+
+### Business context on the intro screen
 
 Four optional, closed-vocabulary fields — country, company size band, sector,
 AI role — offered on the intro screen and used to tailor answers. Replaces the
@@ -266,9 +326,29 @@ free-text `Industry · optional` box, which was per-query and ephemeral.
 
 **Before deploying:** this adds columns to `users`, so it exercises the exact
 migration path that took the API down on 2026-08-10. They are in the guarded
-`ALTER` list, and the pre-Google regression tests (SQLite + Postgres) now assert
-the profile columns arrive too — but `logs api | head -40` after `up -d` is
-still the check that matters.
+`ALTER` list; the pre-Google regression tests (SQLite + Postgres) assert the
+profile columns arrive, and there is now a Postgres test starting from **the
+schema prod is actually on** (`google_sub` + `email` present, profile columns
+absent) — the older test began two releases behind. Run it before a deploy that
+touches the schema:
+
+```bash
+docker run -d --name pgtest -e POSTGRES_PASSWORD=test -e POSTGRES_DB=eurag \
+  -p 55432:5432 postgres:16
+EURAG_TEST_DATABASE_URL="postgresql://postgres:test@127.0.0.1:55432/eurag" \
+  .venv/bin/python -m pytest tests/test_postgres.py -q
+docker rm -f pgtest
+```
+
+`logs api | head -40` after `up -d` is still the check that matters.
+
+### Also in the tree
+
+`linkedin.md` — a written-up post and long-form article about the project, for
+publishing. Fact-checked against the repo on 2026-08-10 (commit count, LOC,
+corpus size, test count, harness numbers, the five-week timeline). **It states
+things that go stale**: the timeline, and that the escalation telemetry has
+never been read against real traffic. Check both before publishing it late.
 
 ## Open work, in priority order
 
@@ -325,6 +405,19 @@ no streaming, no i18n, no monitoring.
   Now sharper: the free tier is 10 lifetime questions, so the funnel already
   ends at "add your own key". Stripe is the only alternative to that being the
   permanent answer.
+- **Native sign-in has no email, so there is still no password reset.**
+  Discussed 2026-08-10, not decided. The recommendation on the table: keep
+  Google *and* replace the password path with **email one-time codes** rather
+  than adding email + password + reset. It is two endpoints instead of three
+  flows, and verification and recovery fall out for free because the mailbox is
+  the credential each time. Two things gate it — (a) it needs a real domain,
+  because DuckDNS gives no SPF/DKIM/DMARC records so nothing can send mail from
+  `eurag.duckdns.org`, and (b) it would reverse the documented "Google and
+  password accounts cannot be linked" decision, which is only safe to reverse
+  because a mailbox-proven email is the proof of ownership those accounts never
+  had. Same decision as the Stripe one: Stripe needs an email regardless.
+  **The admin account is a password account** (first registered user), so
+  removing password login without a migration locks `/admin` out.
 - **Industries** (long-open) — which sectors matter for Tier-2 sector law.
   **Now actually measurable:** the sector is a fixed enum carried on the
   unconditional `query outcome:` line, so it aggregates. The old
@@ -352,7 +445,23 @@ no streaming, no i18n, no monitoring.
   built its DB from scratch. On Postgres `executescript` is **one** statement, so
   one bad line discards the whole schema.
 - **`0 documents indexed` means `/healthz` is failing**, not an empty corpus —
-  see the box under *The live deployment*.
+  see the box under *The live deployment*. The home page no longer prints the
+  count into its opening sentence when it is 0, because "0 documents in all" set
+  in prose is a worse failure than a blank counter.
+- **A bound that protects a downstream consumer should truncate, not reject** —
+  check what the consumer actually reads first. `HistoryTurn` capped prior turns
+  with `max_length`, so a follow-up 422'd over EURAG's own previous answer while
+  the contextualiser would have sliced it to 400 chars anyway.
+- **A test can lock a bug in.** `test_query_rejects_oversize_history` asserted
+  the exact rejection that was breaking every third question, which is part of
+  why it survived review. When a fix requires changing an existing assertion,
+  read that assertion as a *claim about intended behaviour* and decide which one
+  is wrong — then leave a note saying which, so it is not "restored".
+- **Verify a UI change by rendering it.** Three bugs in the redesign were
+  invisible in the CSS and obvious in a screenshot. But **headless Chrome's
+  `--window-size` does not set the layout viewport** — it renders at 500px and
+  crops, so a fine page looks broken and a broken one can look fine. Put the
+  page in a sized `<iframe>` from a wrapper page instead.
 - **Pin `EURAG_HYDE_MODEL=none` before any retrieval A/B.** Expansion calls
   Haiku, so the harness is non-deterministic; the golden set has 3 compound
   cases, so one flip is 33pp. A "safer" rerank batch was nearly shipped on noise.

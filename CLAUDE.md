@@ -67,8 +67,9 @@ cd frontend/web && npm install && npm run build   # or: npm run dev
 | `api/` | `main`, `deps` (auth/tenant/tier), `routes/*`, `middleware/` (ratelimit, headers) |
 | `data/` | `scrapers/` (eurlex, portals, funding_calls, common), `samples/`, `seed.py` |
 | `frontend/static/` | zero-dep chat UI (local single-user mode) |
-| `frontend/web/` | Next.js app (accounts, Google sign-in, saved chats, tiers, `/privacy` + `/terms`) |
-| `tests/` | unit + integration; `test_security`, `test_tiers`, `test_google_signin`, `test_profile`, `test_postgres` |
+| `frontend/web/` | Next.js app (accounts, Google sign-in, saved chats, tiers, business context, `/privacy` + `/terms`) |
+| `linkedin.md` | public write-up of the project, for publishing — states a timeline and "telemetry not yet read", both of which go stale |
+| `tests/` | unit + integration; `test_security`, `test_tiers`, `test_google_signin`, `test_profile`, `test_chat_import`, `test_followups`, `test_postgres` |
 
 ## How it works (the load-bearing bits)
 
@@ -82,7 +83,12 @@ cd frontend/web && npm install && npm run build   # or: npm run dev
   HyDE** — expanding a fragment just amplifies the wrong topic. The rewrite is
   what retrieval *and* the answerer see, so the answerer never handles a
   fragment and cite-or-fail is untouched. Anonymous requests send their turns
-  (capped, untrusted); `/conversations/{id}/messages` reads its own stored chat.
+  (**truncated**, untrusted — see Gotchas); `/conversations/{id}/messages` reads
+  its own stored chat, which is server-owned and needs no caps.
+- **Anonymous → account continuity**: `POST /conversations/import` adopts an
+  anonymous thread into the account that just signed in, verbatim and without a
+  model call. The wall fires *because* the free questions ran out, so sign-up is
+  exactly when there is a conversation worth keeping.
 - **Generation**: model may use only the numbered sources, must cite every
   claim; uncited/mis-cited answers are regenerated then downgraded to verbatim
   quotes. **One exception**: an *honest refusal* may cite nothing — the model
@@ -411,5 +417,12 @@ writing that it doesn't happen.
 
 Deferred: password accounts have no email, so **no password reset** (narrower
 than it was — Google sign-in gives new users a recovery-capable route — but it
-still bites anyone who registered with a username and password);
-registry-uploads-per-instance; no streaming; no i18n; no monitoring.
+still bites anyone who registered with a username and password). A design for
+replacing the password path with **email one-time codes** is on the table but
+undecided; it needs a real domain first, because DuckDNS exposes no
+SPF/DKIM/DMARC records so nothing can send mail from `eurag.duckdns.org`. Note
+the admin account is a password account (first registered user), so removing
+password login without a migration locks `/admin` out —
+`context_files/HANDOFF.md` → *Decisions waiting on the user*.
+Also deferred: registry-uploads-per-instance; no streaming; no i18n; no
+monitoring.
