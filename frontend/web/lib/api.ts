@@ -60,6 +60,12 @@ export type HistoryTurn = { question: string; answer: string };
  *  request small. */
 export const HISTORY_TURNS = 3;
 
+/** How much of a prior answer to send. The server truncates too, but sending
+ *  whole answers meant every follow-up shipped kilobytes of prose back for
+ *  nothing: the contextualiser reads the first 400 characters of a turn and no
+ *  more. 600 leaves headroom without being wasteful. */
+export const HISTORY_ANSWER_CHARS = 600;
+
 export type ChatSummary = { id: string; title: string; updated_at: number };
 export type Chat = ChatSummary & { messages: ChatMessage[] };
 

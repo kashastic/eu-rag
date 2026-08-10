@@ -80,13 +80,37 @@ def profile_of(body: "QueryRequest | object") -> BusinessProfile | None:
     return sent.to_profile() if sent is not None else None
 
 
-class HistoryTurn(BaseModel):
-    """One prior exchange. Caps are deliberate: this is client-supplied text
-    that ends up inside a prompt, so it is bounded the same way /ingest is.
-    Answers are trimmed hard because only their topic matters to the rewrite."""
+# A prior turn is bounded because it is client-supplied text that ends up in a
+# prompt. It is *truncated* rather than rejected: the only consumer is
+# `QueryContextualizer.standalone`, which already reads no more than
+# MAX_ANSWER_CHARS (400) of an answer and only the last few turns — so a cap
+# that 422s is refusing a request over text the pipeline would have sliced off
+# anyway. And the text in question is EURAG's own previous answer, so rejecting
+# it fails the user for something they did not write.
+HISTORY_CHARS = 2000
 
-    question: str = Field(max_length=2000)
-    answer: str = Field(default="", max_length=2000)
+
+class HistoryTurn(BaseModel):
+    """One prior exchange, oldest first.
+
+    **Truncated, never rejected.** This used to be `max_length=2000` on both
+    fields, which meant a third question in a thread whose second answer ran
+    long returned `422 answer: String should have at most 2000 characters` —
+    and because request validation runs before the route body, it failed ahead
+    of the quota check and rendered in the transcript as the answer. Only the
+    topic of a prior turn matters to the rewrite, so slicing is the correct
+    behaviour and was what the original comment claimed to be doing.
+    """
+
+    question: str = ""
+    answer: str = ""
+
+    @field_validator("question", "answer", mode="before")
+    @classmethod
+    def _truncate(cls, value):
+        if not isinstance(value, str):
+            return value
+        return value[:HISTORY_CHARS]
 
 
 class QueryRequest(BaseModel):

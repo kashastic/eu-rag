@@ -20,6 +20,47 @@ them. Don't paste the same paragraph into three files — link.
 
 ---
 
+## 2026-08-10 (The third question in a thread returned a validation error)
+
+### [GOTCHA] A cap that rejects, on text the user did not write
+
+Anonymous follow-ups reached
+`422 answer: String should have at most 2000 characters` — rendered in the
+transcript where the answer belongs — from the third question of a thread
+onwards. `/query` is stateless, so the client sends prior turns; `HistoryTurn`
+capped both fields with `max_length`, which **rejects**. Answers routinely run
+past 2000 characters, so the request failed as soon as a long one was behind
+you.
+
+Three things made it worse than an ordinary validation error:
+
+- The over-long string is **EURAG's own previous answer**. The user was refused
+  for text they did not write and could not shorten.
+- **Request validation runs before the route body**, so it failed ahead of the
+  bot gate and the quota check. The user saw a validation error rather than the
+  login wall they were actually due.
+- The docstring already said *"answers are trimmed hard because only their topic
+  matters to the rewrite"*. **Nothing trimmed them.** The comment described the
+  intended behaviour and the code did the opposite, which is why it read as
+  correct in review.
+
+**Fix:** prior turns are truncated, not rejected (`HISTORY_CHARS`, a
+`mode="before"` validator). Nothing is lost — the only consumer is
+`QueryContextualizer.standalone`, which already reads at most
+`MAX_ANSWER_CHARS` (400) of an answer and only the last `MAX_TURNS` (3) turns.
+The API was refusing requests over text the pipeline would have sliced off
+anyway. The client now trims to 600 chars before sending as well, so a
+follow-up stops shipping kilobytes of prose for nothing.
+
+The number of turns is still `max_length` and still rejects — that one is a
+real bound on request size, and the client controls it.
+
+**The lesson worth keeping:** when a bound exists to protect a downstream
+consumer, check what that consumer actually reads. If it truncates, the bound
+should truncate too; rejecting turns a non-problem into a user-visible failure.
+
+---
+
 ## 2026-08-10 (Signing in destroyed the conversation that caused it)
 
 ### [GOTCHA] The login wall fired, and the sign-up threw away the thread

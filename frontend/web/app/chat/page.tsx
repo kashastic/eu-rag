@@ -10,6 +10,7 @@ import {
   type Chat,
   type ChatMessage,
   type ChatSummary,
+  HISTORY_ANSWER_CHARS,
   type HistoryTurn,
 } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
@@ -610,7 +611,13 @@ function toHistory(msgs: ChatMessage[]): HistoryTurn[] {
     const next = msgs[i + 1];
     turns.push({
       question: msg.content,
-      answer: next && next.role === "assistant" ? next.content : "",
+      // trimmed: only the topic of a prior turn matters to the rewrite, and
+      // sending whole answers is what used to push the request past the
+      // server's cap on the third question of a thread
+      answer:
+        next && next.role === "assistant"
+          ? next.content.slice(0, HISTORY_ANSWER_CHARS)
+          : "",
     });
   });
   return turns;

@@ -164,26 +164,37 @@ def test_query_without_history_is_unchanged(settings, monkeypatch):
         assert seen["history"] == []
 
 
-def test_query_rejects_oversize_history(settings):
-    """History is client-supplied text that lands in a prompt, so it is capped
-    the same way /ingest fields are."""
+def test_query_bounds_history_by_turns_but_truncates_long_ones(settings):
+    """History is client-supplied text that lands in a prompt, so it is bounded
+    — but the two bounds behave differently on purpose.
+
+    **Turn count rejects**: an unbounded number of turns is a real request-size
+    problem and the client controls it.
+
+    **Turn length truncates.** This assertion used to require 422 on an answer
+    over 2000 characters, which is exactly the bug it locked in: answers
+    routinely run longer, so the third question of any real thread failed with
+    `answer: String should have at most 2000 characters` — over EURAG's own
+    previous answer, and before the quota check ran. Do not restore it. Full
+    reasoning in `docs/UPDATE_LOG.md`; behaviour in `tests/test_followups.py`.
+    """
     from api.main import app
 
     with TestClient(app) as client:
-        res = client.post(
+        too_many = client.post(
             "/query",
             json={
                 "question": "follow up?",
                 "history": [{"question": "q", "answer": "x"}] * 11,
             },
         )
-        assert res.status_code == 422
+        assert too_many.status_code == 422
 
-        res = client.post(
+        long_answer = client.post(
             "/query",
             json={
                 "question": "follow up?",
                 "history": [{"question": "q", "answer": "x" * 2001}],
             },
         )
-        assert res.status_code == 422
+        assert long_answer.status_code == 200

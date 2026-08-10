@@ -32,7 +32,7 @@ numbers is [`docs/DEVLOG.md`](docs/DEVLOG.md); dated decisions and gotchas —
 # env (Python 3.11+; venv already exists at .venv)
 source .venv/bin/activate
 
-# tests — 316 pass / 8 skip, fully offline (hash embedder, no API key needed)
+# tests — 322 pass / 8 skip, fully offline (hash embedder, no API key needed)
 .venv/bin/python -m pytest -q
 EURAG_LIVE_TESTS=1 pytest tests/test_hardening.py -q        # opt-in live LLM test
 EURAG_TEST_DATABASE_URL=postgresql://… pytest tests/test_postgres.py   # opt-in PG parity
@@ -253,6 +253,13 @@ Full reasoning, symptoms, and the decisions behind them:
   `aud` check is the load-bearing one. A Google login keys on `google_sub`
   **only** — never username or email, or registering someone's username becomes
   account takeover (`docs/UPDATE_LOG.md`).
+- **Prior turns on `/query` are truncated, never rejected.** `HistoryTurn` used
+  `max_length=2000`, so the third question of a thread 422'd on *EURAG's own
+  previous answer* — and since validation runs before the route body, ahead of
+  the quota check and the bot gate. The contextualiser reads only the first 400
+  chars of an answer, so the cap was refusing text the pipeline would have
+  sliced anyway. **When a bound protects a downstream consumer, check what that
+  consumer reads: if it truncates, the bound should truncate.**
 - **Signing in must not destroy the anonymous thread.** The login wall is raised
   *by* `anonymous_limit_reached`, so sign-up happens exactly when the visitor has
   a conversation worth keeping. `POST /conversations/import` adopts it verbatim —
