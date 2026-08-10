@@ -231,6 +231,22 @@ export const api = {
   async createChat() {
     return request<ChatSummary>("/conversations", { method: "POST", body: "{}" });
   },
+  /** Carry an anonymous thread into the account that just signed in. Stores the
+   *  turns verbatim — no model call, and it does not spend a free question,
+   *  because these answers were already paid for on the anonymous tier. */
+  async importChat(messages: ChatMessage[]) {
+    return request<Chat>("/conversations/import", {
+      method: "POST",
+      body: JSON.stringify({
+        messages: messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+          citations: m.citations,
+          meta: m.meta,
+        })),
+      }),
+    });
+  },
   async getChat(id: string) {
     return request<Chat>(`/conversations/${id}`);
   },

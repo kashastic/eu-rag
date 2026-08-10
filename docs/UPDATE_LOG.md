@@ -20,6 +20,50 @@ them. Don't paste the same paragraph into three files — link.
 
 ---
 
+## 2026-08-10 (Signing in destroyed the conversation that caused it)
+
+### [GOTCHA] The login wall fired, and the sign-up threw away the thread
+
+`onLoggedIn` called `setAnonMsgs([])`. The anonymous thread lived only in client
+state, so signing in discarded it — and because the wall is raised *by*
+`anonymous_limit_reached`, the moment of sign-up is precisely when the user has a
+conversation they care about. They came back to an empty screen.
+
+Reported against Google sign-in, but `onSuccess` is shared: **both** the password
+and Google paths did it.
+
+**Fix:** `POST /conversations/import` adopts the turns into a real saved chat
+before the state is cleared, and the client opens that chat. Because the turns
+are stored, `_history()` picks them up, so the next question is a follow-up with
+the earlier context — the thread is continuable, not just visible.
+
+### [DECISION] Import stores verbatim: no model call, no quota spend
+
+The obvious implementation is to replay the questions through
+`POST /conversations/{id}/messages`, and it is wrong twice over: it would bill
+the user (or the server) a second time for answers they are already looking at,
+and it would produce *different* answers than the ones on screen, which is a
+strange thing to do to a transcript someone is watching.
+
+So the route writes the turns as they were. That is also what stops it being a
+free-answer path — it never reaches a model, and there is a test asserting
+`pipeline.query` is not called. Citations are preserved deliberately: dropping
+them would leave a citation-first product showing a transcript whose answers
+appear uncited.
+
+The content is client-supplied, but it lands only in the caller's own private
+conversation — which they could fill with anything by typing — so it is capped
+and shape-checked rather than trusted or refused.
+
+### [GOTCHA] A failed import must not be the same as no import
+
+The client only clears `anonMsgs` when the import **succeeds**, and the
+transcript falls back to rendering them when a signed-in user has no active
+chat. A network blip therefore leaves the conversation on screen rather than
+reproducing the bug it was written to fix.
+
+---
+
 ## 2026-08-10 (Visual identity — black ink on bond paper)
 
 ### [DECISION] The home screen explains the product by behaving like it

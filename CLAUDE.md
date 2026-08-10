@@ -32,7 +32,7 @@ numbers is [`docs/DEVLOG.md`](docs/DEVLOG.md); dated decisions and gotchas —
 # env (Python 3.11+; venv already exists at .venv)
 source .venv/bin/activate
 
-# tests — 307 pass / 7 skip, fully offline (hash embedder, no API key needed)
+# tests — 316 pass / 8 skip, fully offline (hash embedder, no API key needed)
 .venv/bin/python -m pytest -q
 EURAG_LIVE_TESTS=1 pytest tests/test_hardening.py -q        # opt-in live LLM test
 EURAG_TEST_DATABASE_URL=postgresql://… pytest tests/test_postgres.py   # opt-in PG parity
@@ -253,6 +253,12 @@ Full reasoning, symptoms, and the decisions behind them:
   `aud` check is the load-bearing one. A Google login keys on `google_sub`
   **only** — never username or email, or registering someone's username becomes
   account takeover (`docs/UPDATE_LOG.md`).
+- **Signing in must not destroy the anonymous thread.** The login wall is raised
+  *by* `anonymous_limit_reached`, so sign-up happens exactly when the visitor has
+  a conversation worth keeping. `POST /conversations/import` adopts it verbatim —
+  **no model call and no quota spend**, because those answers were already paid
+  for on the anonymous tier (and that is what stops the route being a free-answer
+  path). The client clears `anonMsgs` only on success.
 - **There are TWO logged-in ask paths** — `/query` with a bearer token and
   `POST /conversations/{id}/messages` (what the web app uses for saved chats).
   Any per-user gate must go through `api/deps.spend_free_question` or it is

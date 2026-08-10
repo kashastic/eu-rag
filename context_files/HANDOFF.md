@@ -1,7 +1,7 @@
 # HANDOFF — continue here
 
 **As of:** 2026-08-10 · **EURAG is LIVE** at <https://eurag.duckdns.org> ·
-prod runs `15cbfc0` · **308 tests pass, 7 skipped** locally.
+prod runs `15cbfc0` · **316 tests pass, 8 skipped** locally.
 
 > **Pushed, not yet deployed.** `f267bfb` on `origin/main` carries the
 > business-context batch (intro-screen profile) **and** the black-and-white
@@ -21,14 +21,16 @@ work here*; this file wins on *what is true right now*. Build history with
 measurements: [`docs/DEVLOG.md`](../docs/DEVLOG.md). Why things are the way
 they are: [`docs/UPDATE_LOG.md`](../docs/UPDATE_LOG.md).
 
-**The working tree is clean and everything is deployed.** Start by confirming
-that, not by looking for pending work:
+Start by confirming where things stand, not by looking for pending work:
 
 ```bash
-git status --short && git log --oneline -1     # expect: clean, 15cbfc0
-.venv/bin/python -m pytest -q                  # expect: 277 passed, 7 skipped
+git status --short && git log --oneline -1     # expect: clean
+.venv/bin/python -m pytest -q                  # expect: 316 passed, 8 skipped
 curl -s https://eurag.duckdns.org/healthz | python3 -m json.tool
 ```
+
+If `/healthz` reports a commit older than `origin/main`, the box above still
+applies: there is work pushed but not deployed.
 
 **The privacy claims are checkable from here** — re-run these if you touch the
 frontend, because they are what `/privacy` promises in writing:

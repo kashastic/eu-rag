@@ -121,15 +121,36 @@ export default function ChatPage() {
     threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight, behavior: "smooth" });
   }, [active?.messages.length, anonMsgs.length, pending]);
 
-  const messages: ChatMessage[] = authed ? active?.messages ?? [] : anonMsgs;
+  // The `anonMsgs` fallback is the safety net for a failed import: the turns are
+  // still in state, so show them instead of pretending the conversation never
+  // happened. They are read-only at that point — the next question opens a
+  // fresh saved chat — but nothing is silently lost.
+  const messages: ChatMessage[] = authed
+    ? active?.messages ?? (anonMsgs.length ? anonMsgs : [])
+    : anonMsgs;
 
   async function onLoggedIn() {
     setLoginOpen(false);
     setLoginForced(false);
-    setAnonMsgs([]);
     setAnonRemaining(null);
-    setActive(null);
+
+    // Carry the anonymous thread into the new account BEFORE clearing it. The
+    // login wall fires because the free questions ran out, so this is exactly
+    // the conversation that prompted the sign-up — dropping it was the whole
+    // bug. Import failure keeps the messages in state rather than discarding
+    // them (see `messages` below), so a network blip cannot lose the thread.
+    let adopted: Chat | null = null;
+    if (anonMsgs.length > 0) {
+      try {
+        adopted = await api.importChat(anonMsgs);
+        setAnonMsgs([]);
+      } catch {
+        adopted = null;
+      }
+    }
+    setActive(adopted);
     await init();
+    if (adopted) await refreshList();
   }
 
   function logout() {

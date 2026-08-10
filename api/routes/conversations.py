@@ -1,6 +1,8 @@
 """Saved-chat endpoints. All require auth; a user only ever sees and mutates
 their own conversations (ownership checked on every id)."""
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -36,6 +38,31 @@ class Ask(BaseModel):
     industry: str | None = Field(default=None, max_length=80, deprecated=True)
 
 
+class ImportedCitation(BaseModel):
+    """One citation as the client already received it. Capped like every other
+    client-supplied string that reaches storage."""
+
+    marker: int = Field(ge=1, le=99)
+    title: str = Field(default="", max_length=300)
+    source_url: str = Field(default="", max_length=1000)
+    quote: str = Field(default="", max_length=4000)
+    chunk_id: str = Field(default="", max_length=200)
+
+
+class ImportedMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=20000)
+    citations: list[ImportedCitation] = Field(default_factory=list, max_length=12)
+    meta: dict = Field(default_factory=dict)
+
+
+class ImportChat(BaseModel):
+    # An anonymous visitor gets a handful of free questions, so a real thread is
+    # a few turns; the cap is generous and exists to bound the write, not to
+    # shape the feature.
+    messages: list[ImportedMessage] = Field(min_length=1, max_length=40)
+
+
 def _store(request: Request):
     store = request.app.state.conversations
     if store is None:
@@ -46,6 +73,47 @@ def _store(request: Request):
 @router.post("/conversations")
 def create(body: NewChat, request: Request, p: Principal = Depends(current_principal)):
     return _store(request).create(p.username, body.title)
+
+
+@router.post("/conversations/import")
+def import_chat(body: ImportChat, request: Request, p: Principal = Depends(current_principal)):
+    """Adopt an anonymous thread into the account that just signed in.
+
+    The login wall fires precisely *because* someone ran out of free questions,
+    so without this the act of signing up destroys the conversation that
+    prompted it. The turns are stored verbatim.
+
+    **No pipeline call and no quota spend.** These answers were already produced
+    and already paid for on the anonymous tier; re-running them would charge the
+    user (or the server) twice for text they are looking at. That is also why
+    this route cannot be used to get a free answer — it never reaches a model.
+
+    The content is client-supplied, but it lands only in the caller's own
+    private conversation, which they could fill with anything by typing. It is
+    capped and shape-checked so it cannot be used as unbounded storage.
+    """
+    store = _store(request)
+    first_question = next(
+        (m.content for m in body.messages if m.role == "user" and m.content.strip()), ""
+    )
+    conv = store.create(p.username, first_question[:60] or "New chat")
+    for m in body.messages:
+        store.add_message(
+            conv["id"],
+            m.role,
+            m.content,
+            citations=[c.model_dump() for c in m.citations],
+            meta=m.meta,
+        )
+    if request.app.state.auth_enabled:
+        # a new way for content to enter a tenant belongs in the trail
+        request.app.state.auth.audit(
+            p.username,
+            "conversation.import",
+            resource=conv["id"],
+            detail=f"{len(body.messages)} messages",
+        )
+    return store.get(conv["id"], p.username)
 
 
 @router.get("/conversations")
