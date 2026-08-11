@@ -102,8 +102,18 @@ a { color: var(--ink); text-underline-offset: 2px; }
   background: var(--paper-2); border-right: 1px solid var(--rule-2);
   display: flex; flex-direction: column; min-height: 0;
 }
-.sidebar-head { padding: 20px 18px 14px; border-bottom: 1px solid var(--rule-2); }
+.sidebar-head {
+  padding: 20px 18px 14px; border-bottom: 1px solid var(--rule-2);
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
 .sidebar-head .brand { font-size: 19px; }
+
+/* ---------- narrow-screen navigation ----------
+   The drawer and its controls exist only below 720px; at desktop widths the
+   sidebar is a permanent column and all three of these are display:none. They
+   are defined here, off, so the narrow-screen block only has to turn them on —
+   a control that is hidden by default cannot leak onto the wide layout. */
+.nav-toggle, .nav-close, .nav-scrim { display: none; }
 .new-chat {
   margin: 14px 18px; padding: 10px 12px; text-align: left; cursor: pointer;
   font: 14px var(--serif); color: var(--ink); background: var(--paper);
@@ -139,11 +149,15 @@ a { color: var(--ink); text-underline-offset: 2px; }
   padding: 15px 30px 13px; border-bottom: 3px double var(--ink);
   display: flex; justify-content: space-between; align-items: baseline; gap: 14px;
 }
-.pane-head > span:first-child {
+/* :first-of-type, not :first-child — the narrow-screen menu button is the
+   masthead's first child at every width (it is display:none on desktop, not
+   absent from the DOM), so :first-child stopped matching the title and took
+   its type with it. */
+.pane-head > span:first-of-type {
   font-family: var(--display); font-weight: 600; font-size: 16px;
   letter-spacing: 0.02em; color: var(--ink);
 }
-.pane-head > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pane-head > span:first-of-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pane-head .badge {
   font: 10px var(--mono); letter-spacing: 0.13em; text-transform: uppercase;
   color: var(--pencil); white-space: nowrap; flex: none;
@@ -448,6 +462,8 @@ a { color: var(--ink); text-underline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) {
   .auth-card.modal, .opening-statement, .footnotes, .starters { animation: none; }
   .spin span { animation: none; opacity: 0.6; }
+  /* the drawer still opens and closes, it just arrives instead of sliding */
+  .sidebar, .nav-scrim { transition: none; }
 }
 
 @media (max-width: 900px) {
@@ -458,7 +474,57 @@ a { color: var(--ink); text-underline-offset: 2px; }
 }
 @media (max-width: 720px) {
   .shell { grid-template-columns: minmax(0, 1fr); }
-  .sidebar { display: none; }
+
+  /* The sidebar is off-canvas here, NOT display:none. Hiding it outright is
+     what this used to do, and it took New chat, the saved-chat list, the
+     account name and sign-out off the phone entirely — with no way to switch
+     between saved chats, which is most of what an account is for. Anonymously
+     it also removed the only "Sign in to save chats" button on the page.
+     Transform rather than `left`, so the slide is composited and the drawer
+     keeps its own scrolling chat list. */
+  .sidebar {
+    position: fixed; z-index: 60; top: 0; bottom: 0; left: 0;
+    width: min(84vw, 300px);
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+    border-right: 1px solid var(--ink);
+    box-shadow: 2px 0 0 rgba(12, 12, 13, 0.06);
+  }
+  .sidebar.open { transform: none; }
+  /* Closed, it is off screen but still in the tab order — a keyboard user
+     would tab into an invisible chat list. Hidden from assistive tech and
+     pointer input until it is open. */
+  .sidebar:not(.open) { visibility: hidden; }
+
+  .nav-scrim {
+    display: block; position: fixed; inset: 0; z-index: 55;
+    background: rgba(12, 12, 13, 0.36);
+    opacity: 0; pointer-events: none; transition: opacity 0.22s ease;
+  }
+  .nav-scrim.open { opacity: 1; pointer-events: auto; }
+
+  /* Three rules, drawn rather than set as a glyph: the hamburger as a
+     character (≡) sits on the text baseline and reads as punctuation next to
+     the masthead's serif title. */
+  .nav-toggle {
+    display: flex; flex-direction: column; justify-content: center; gap: 4px;
+    flex: none; width: 34px; height: 34px; padding: 8px 6px; margin-left: -6px;
+    background: none; border: none; border-radius: 0; cursor: pointer;
+    align-self: center;
+  }
+  .nav-toggle span { display: block; height: 1.5px; background: var(--ink); }
+  .nav-toggle:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+
+  .nav-close {
+    display: block; flex: none; background: none; border: none; padding: 4px 2px;
+    font: 15px var(--mono); color: var(--pencil); cursor: pointer; line-height: 1;
+  }
+  .nav-close:hover { color: var(--ink); }
+
+  /* the title is now the middle of three items, so it needs the shrink */
+  .pane-head { align-items: center; gap: 10px; }
+  .pane-head > span:first-of-type { flex: 1; }
+
   /* the corpus count still fits and still matters; the tagline does not */
   .pane-head .badge .tagline { display: none; }
   .thread, .composer, .pane-head, .tier-banner { padding-left: 18px; padding-right: 18px; }

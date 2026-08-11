@@ -68,6 +68,12 @@ export default function ChatPage() {
   const [loginMode, setLoginMode] = useState<"login" | "register">("login");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  // Narrow screens only: the sidebar is off-canvas there and this opens it.
+  // Below 720px it used to be `display: none` with nothing in its place, which
+  // took New chat, the saved-chat list, the account and sign-out off the phone
+  // entirely — and anonymously it took away the only "Sign in" affordance
+  // there was. Always false on desktop, where the sidebar is simply present.
+  const [navOpen, setNavOpen] = useState(false);
   const threadRef = useRef<HTMLDivElement>(null);
 
   const init = useCallback(async () => {
@@ -122,6 +128,17 @@ export default function ChatPage() {
     threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight, behavior: "smooth" });
   }, [active?.messages.length, anonMsgs.length, pending]);
 
+  // Escape closes the drawer, like every other overlay on the page. Bound only
+  // while it is open so the listener isn't live for the whole session.
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setNavOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navOpen]);
+
   // The `anonMsgs` fallback is the safety net for a failed import: the turns are
   // still in state, so show them instead of pretending the conversation never
   // happened. They are read-only at that point — the next question opens a
@@ -160,16 +177,22 @@ export default function ChatPage() {
     setAccount(null);
     setChats([]);
     setActive(null);
+    setNavOpen(false);
   }
 
   // ---- authed saved-chat helpers ----
   const refreshList = useCallback(async () => {
     setChats((await api.listChats()).conversations);
   }, []);
+  // Every one of these closes the drawer: on a phone it covers the thread, so
+  // picking a chat and being left staring at the list is a dead end. Deleting
+  // is the exception — you may well delete several.
   async function openChat(id: string) {
+    setNavOpen(false);
     setActive(await api.getChat(id));
   }
   async function newChat() {
+    setNavOpen(false);
     setActive(null);
   }
   async function removeChat(id: string, e: React.MouseEvent) {
@@ -279,9 +302,27 @@ export default function ChatPage() {
 
   return (
     <div className="shell">
-      <aside className="sidebar">
+      {/* Below 720px the sidebar is off-canvas, so it needs something to
+          dismiss it that isn't the toggle — a tap on the thread behind it is
+          what a phone user reaches for first. Inert (display:none) at desktop
+          widths, where the sidebar is always on screen. */}
+      <div
+        className={"nav-scrim" + (navOpen ? " open" : "")}
+        onClick={() => setNavOpen(false)}
+        aria-hidden="true"
+      />
+      <aside className={"sidebar" + (navOpen ? " open" : "")} id="sidebar">
         <div className="sidebar-head">
           <span className="brand">EURAG<span className="star">★</span></span>
+          {/* the drawer's own close control: on a phone the toggle in the
+              masthead is behind the drawer once it is open */}
+          <button
+            className="nav-close"
+            onClick={() => setNavOpen(false)}
+            aria-label="Close menu"
+          >
+            ✕
+          </button>
         </div>
         {authed ? (
           <>
@@ -312,6 +353,7 @@ export default function ChatPage() {
             <button
               className="btn"
               onClick={() => {
+                setNavOpen(false);
                 setLoginForced(false);
                 setLoginMode("login");
                 setLoginOpen(true);
@@ -325,6 +367,17 @@ export default function ChatPage() {
 
       <main className="pane">
         <div className="pane-head">
+          <button
+            className="nav-toggle"
+            onClick={() => setNavOpen(true)}
+            aria-label="Open menu"
+            aria-expanded={navOpen}
+            aria-controls="sidebar"
+          >
+            <span />
+            <span />
+            <span />
+          </button>
           <span>{authed ? (active ? active.title : "New chat") : "EURAG"}</span>
           <span className="badge">
             {documents > 0 && <>{documents} official texts</>}
