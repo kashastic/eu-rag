@@ -20,6 +20,128 @@ them. Don't paste the same paragraph into three files — link.
 
 ---
 
+## 2026-08-11 (Greetings got random answers; the phone had no menu)
+
+### [DECISION] "hello" is answered from a constant, before retrieval
+
+Reported as *"questions like hi / hello / how are you get random responses"*.
+The cause is structural rather than a bug in any one component: **retrieval
+ranks, it never rejects.** BM25 and vector search return their best k for any
+input, so "hello" came back with six passages of EU law and the answerer was
+told, correctly, to answer the question using only those sources.
+
+Measured on the live pipeline before the fix (numbers in
+[`DEVLOG.md`](DEVLOG.md)):
+
+| input | what shipped | cost |
+|---|---|---|
+| `hello` | **three verbatim quotes from the Pay Transparency Directive**, mode `extractive` | HyDE + 2 Sonnet + 2 Opus |
+| `blah blah` | an honest refusal (good) | HyDE + Sonnet + Opus |
+| `how are you doing` | an honest refusal (good) | HyDE + Sonnet + Opus |
+| `what is the weather in Berlin tomorrow` | an honest refusal (good) | HyDE + Sonnet + Opus |
+
+So there were two distinct problems, and only the first is a quality problem:
+`hello` produced **nonsense with citations**, which on a citation-first product
+is the worst failure mode it has. The other three produced *good* answers at a
+bad price.
+
+**Fix (`core/smalltalk.py`):** a deterministic whole-string match, run at the
+top of `pipeline.query`, answering with a fixed orientation message. No
+retrieval, no model call, `mode="smalltalk"`.
+
+Three properties are load-bearing:
+
+- **Whole-string matching, never substring.** "hi, do I need a DPO?" is a
+  question and must reach retrieval. A false positive answers a real question
+  with a form letter, which is far worse than a missed greeting — that
+  asymmetry is the whole design and is why there is no keyword or model-based
+  matching in there.
+- **It runs before contextualisation.** A bare "thanks" at the end of a thread
+  would otherwise be rewritten by the contextualiser into a full standalone
+  question and *then* answered at random — the same bug wearing a different
+  hat. It also saves the Haiku call.
+- **It does not spend a free question.** No model call, no charge — otherwise
+  the fix trades a random answer for a shorter free trial. Implemented as a
+  refund on all three ask paths (`api.deps.cost_nothing`), since the quota is
+  consumed before the pipeline runs.
+
+`MODES_REFUNDED` is deliberately just `{"smalltalk"}`. `no_sources` also skips
+the model, but it only fires on an empty index — a broken deployment, not a
+user action — and refunding it is unobservable in production while changing
+what nine quota tests assert about the one gate on the owner's Anthropic bill.
+
+### [GOTCHA] The relevance floor cannot be built on the cross-encoder score
+
+The open plan for cutting escalation cost (HANDOFF item 2, *"the biggest cost
+lever"*) was a **relevance floor**: threshold the cross-encoder's top score and
+return `NO_SOURCES_MESSAGE` with zero LLM calls. It was built far enough to
+measure and **the measurement killed it.**
+
+Top rerank score, `Xenova/ms-marco-MiniLM-L-6-v2`, HyDE pinned off:
+
+| group | n | min | median | max |
+|---|---|---|---|---|
+| golden set (English, on-corpus) | 32 | −7.85 | 3.40 | 8.33 |
+| off-corpus + gibberish (English) | 16 | −11.11 | −8.99 | **−3.70** |
+| **legitimate questions in DE/FR/ES/IT/NL/PL/SV/PT/DA** | 12 | **−11.38** | −9.03 | 2.49 |
+
+The English-only groups nearly separate (a threshold near −8.5 would work).
+**The third row destroys it.** A German question about late-payment interest
+scores −11.38; Polish about breach notification −11.31; Italian about high-risk
+AI systems −10.71 — *below* the worst English gibberish ("asdkjfh qwerty",
+−11.11 aside, the rest sit above −10.9). The cross-encoder is trained on
+English MS MARCO; the corpus and the product are not English-only, and
+`answerer` promises to answer in the question's language.
+
+Any threshold that catches "blah blah" therefore tells a Polish SME its
+question falls outside the corpus — silently, on the product whose whole claim
+is that it says so honestly. **No floor shipped.**
+
+What shipped instead is the *instrument*: `top_score` now rides the
+unconditional `query outcome:` line. The question is decidable from real
+traffic, which is what was missing all along; it is not decidable from a
+laptop and a hand-written list of 60 questions. If it is ever revisited, the
+signal needs to be language-neutral — the model's own zero-citation refusal is
+the obvious candidate, since it comes from reading the sources rather than from
+an English encoder.
+
+### [GOTCHA] A git worktree has no `.env`, so the "before" run is a different pipeline
+
+Taking before/after harness numbers in a `git worktree` of HEAD gave
+doc_hit 94% before and 100% after — a spectacular improvement from a change
+that touches no ranking at all. `.env` is **gitignored**, so the worktree had
+no `ANTHROPIC_API_KEY`: the contextualiser silently fell back to
+`ExtractiveClient` and the three follow-up cases retrieved on their raw
+fragments. This is the documented "`.env` is loaded by importing
+`core.config`" trap wearing a worktree costume — and it flatters the change,
+which is the dangerous direction.
+
+Correct A/B pins **every** model in the loop, not just HyDE:
+`EURAG_HYDE_MODEL=none EURAG_CONTEXTUALIZE_MODEL=none`. Pinned, before and
+after are identical to the digit (94% / 0.94 / 87% / 67%), which is the
+expected result: `retrieve()` is now a wrapper over `retrieve_scored()` and
+ranking is untouched.
+
+### [DECISION] The narrow-screen sidebar is off-canvas, not `display: none`
+
+Below 720px the sidebar was simply hidden, and **nothing replaced it**. That
+removed New chat, the saved-chat list, the account name and sign out from every
+phone — so on mobile an account could not switch between its own saved chats,
+which is most of what an account is for. Anonymously it also removed the only
+"Sign in to save chats" button on the page.
+
+Now a drawer: `transform: translateX(-100%)` with a scrim, a hamburger in the
+masthead, dismissed by the scrim, a ✕, Escape, or picking a chat.
+`visibility: hidden` while closed, or a keyboard user tabs into an off-screen
+chat list.
+
+**The trap it set:** the masthead title was styled by `.pane-head > span:first-child`,
+and the menu button is the first child at *every* width (it is `display: none`
+on desktop, not absent from the DOM). That silently unstyled the title on the
+**desktop** layout — a change that is only supposed to affect phones. Now
+`:first-of-type`. Verified by rendering at 1440 as well as 390 and 360, which is
+the only reason it was caught.
+
 ## 2026-08-10 (The third question in a thread returned a validation error)
 
 ### [GOTCHA] A cap that rejects, on text the user did not write

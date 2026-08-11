@@ -1,33 +1,18 @@
 # HANDOFF — continue here
 
-**As of:** 2026-08-10 · **EURAG is LIVE** at <https://eurag.duckdns.org> ·
-prod runs `15cbfc0` · **322 tests pass, 8 skipped** locally.
+**As of:** 2026-08-11 · **EURAG is LIVE** at <https://eurag.duckdns.org> ·
+**338 tests pass, 8 skipped** locally.
 
-> **Four commits pushed, none deployed.** Prod is still on `15cbfc0`;
-> `origin/main` is at `a0a6cec`. Everything below goes live in one deploy:
+> **The 2026-08-10 batch is deployed and verified live** (the "four commits
+> pushed, none deployed" box is gone because it was checked, not because it was
+> assumed): `/privacy` serves the business-context wording, so `f267bfb`'s
+> four-column `users` migration completed and `/healthz` still reports
+> `documents: 47`; `POST /conversations/import` answers **401** rather than 404,
+> so `0cafd3a` is live.
 >
-> | | |
-> |---|---|
-> | `f267bfb` | business context on the intro screen **+** the black-and-white redesign |
-> | `43b8899` | docs |
-> | `0cafd3a` | **fix:** signing in destroyed the anonymous conversation |
-> | `a0a6cec` | **fix:** a long previous answer 422'd the third question in a thread |
->
-> Verified locally: 322 pass / 8 skip, web build clean, rendered at 1440/390/360,
-> and the Postgres migration suite run against a real Postgres **from the exact
-> schema prod is on**. Run the update path below, then delete this box.
->
-> **What to watch on this deploy:** it adds four columns to `users`, so it walks
-> the migration path that took the API down on 2026-08-10. Check
-> `logs api | head -40` and confirm `/healthz` reports `documents: 47` before
-> calling it done — a failed migration shows up as **0 documents** in the UI,
-> not as an error.
->
-> **Then check by hand**, because neither could be verified from a dev machine:
-> ask two questions anonymously to trigger the wall, sign in with Google, and
-> confirm the thread survived and a follow-up still understands it; then run a
-> thread four questions deep and confirm no validation error appears where an
-> answer should be.
+> **One batch is pushed-but-not-deployed again — this one.** See *What shipped
+> 2026-08-11* below. It is backend + frontend, **no schema change**, so the
+> migration risk that dominated the last deploy does not apply.
 
 Read [`CLAUDE.md`](../CLAUDE.md) first for standing rules — it wins on *how to
 work here*; this file wins on *what is true right now*. Build history with
@@ -38,7 +23,7 @@ Start by confirming where things stand, not by looking for pending work:
 
 ```bash
 git status --short && git log --oneline -1     # expect: clean
-.venv/bin/python -m pytest -q                  # expect: 322 passed, 8 skipped
+.venv/bin/python -m pytest -q                  # expect: 338 passed, 8 skipped
 curl -s https://eurag.duckdns.org/healthz | python3 -m json.tool
 ```
 
@@ -115,6 +100,12 @@ echo "$esc / $total escalated"
 # "uncited" = the model failed citation validation twice (a prompt problem)
 docker compose -f docker-compose.prod.yml logs api \
   | grep -o "primary_reason=[a-z_]*" | sort | uniq -c
+# and the relevance distribution, which is what would decide a floor. Compare
+# the scores on escalated queries against unescalated ones — a floor is only
+# viable if they separate, and locally they do NOT (non-English questions score
+# like gibberish; DEVLOG 2026-08-11).
+docker compose -f docker-compose.prod.yml logs api \
+  | grep -o "top_score=[-0-9.]*" | sort -t= -k2 -n | uniq -c
 ```
 
 **Still uncounted.** The first attempt returned `0` over a `0` denominator — no
@@ -350,6 +341,50 @@ corpus size, test count, harness numbers, the five-week timeline). **It states
 things that go stale**: the timeline, and that the escalation telemetry has
 never been read against real traffic. Check both before publishing it late.
 
+## What shipped 2026-08-11 — pushed, NOT deployed
+
+Two bugs reported from using the live site. Reasoning:
+[`docs/UPDATE_LOG.md`](../docs/UPDATE_LOG.md); numbers:
+[`docs/DEVLOG.md`](../docs/DEVLOG.md).
+
+### 1. Greetings got random cited answers
+
+`hello` returned **three verbatim quotes from the Pay Transparency Directive**
+after ~5 model calls, because retrieval ranks but never rejects — six passages
+of EU law came back and the answerer was told to answer from them.
+`core/smalltalk.py` now short-circuits greetings at the top of `pipeline.query`:
+whole-string match, before contextualisation, zero retrieval, zero model calls,
+and **no free question spent** (refunded on all three ask paths via
+`api.deps.cost_nothing`).
+
+Do not loosen the matching to substrings — "hi, do I need a DPO?" must reach
+retrieval, and answering a real question with the canned reply is much worse
+than missing a greeting.
+
+### 2. No menu on mobile
+
+Below 720px the sidebar was `display: none` with nothing in its place: no New
+chat, no saved-chat list, no account, no sign out — and anonymously, no sign-in
+button at all. It is now an off-canvas drawer with a scrim and a masthead
+hamburger. Rendered at 390, 360 **and 1440** — the last caught a desktop
+regression the phone widths could not (the always-present menu button broke
+`.pane-head > span:first-child`).
+
+### 3. The relevance floor was built, measured, and rejected
+
+Open item 2 called a score threshold "the biggest cost lever". Measured: the
+cross-encoder is English-only, so legitimate German/Polish/Italian questions
+score **−11.4 to −8.7**, *below* the worst English gibberish. Any threshold
+that catches "blah blah" silently refuses a Polish SME. **No floor shipped.**
+What shipped is `top_score=` on the `query outcome:` line, so the question is
+decidable from real traffic. Full distributions: DEVLOG.
+
+**Before deploying:** no schema change this time. Standard update path. Worth
+checking by hand afterwards, since neither is verifiable from a dev machine
+against prod's own state: send `hello` anonymously and confirm the reply is the
+orientation message **and** the free-question counter does not move; then ask a
+real question and confirm it does.
+
 ## Open work, in priority order
 
 1. **Billing alerts — still not set.** The one genuinely unbounded risk. A
@@ -361,12 +396,21 @@ never been read against real traffic. Check both before publishing it late.
    shipped for exactly this and **has still never been read against real
    traffic**. Take the reading, then work the `primary_reason` histogram:
 
-   - **No relevance floor** — the top lever. RRF ranks by relative position and
-     the cross-encoder only reorders, so nothing checks whether the best chunk is
-     *actually relevant*: `mode="no_sources"` never fires on a 47-doc corpus and
-     every off-corpus question rides the full cascade. A score threshold
-     returning `NO_SOURCES_MESSAGE` with **zero** LLM calls is the biggest cost
-     lever on the anonymous tier. Needs threshold calibration.
+   - ~~**No relevance floor** — the top lever~~ **closed 2026-08-11: a score
+     threshold cannot be made safe.** The reasoning still holds (nothing checks
+     whether the best chunk is *actually relevant*, `mode="no_sources"` never
+     fires on a 47-doc corpus, every off-corpus question rides the full
+     cascade) — but the proposed *signal* does not work. The cross-encoder is
+     English-only, so legitimate non-English questions score below English
+     gibberish and any usable threshold refuses them. `top_score=` is now on the
+     `query outcome:` line so this is re-checkable against real traffic; a
+     revived floor needs a **language-neutral** signal. The obvious candidate is
+     the model's own zero-citation refusal — it comes from reading the sources
+     rather than from an English encoder — but it has not been measured, and
+     "the corpus lacks this article" and "this question is unrelated to the
+     corpus" may well both produce it.
+   - **Greetings no longer reach the cascade at all** (`core/smalltalk.py`), so
+     the cheapest slice of this problem is already taken.
    - **Split the escalation triggers.** `pipeline.query` gates on `insufficient`,
      conflating "corpus doesn't cover this" (wants deeper retrieval) with
      "citation validation failed" (wants a better prompt). `insufficient_reason`
@@ -475,6 +519,16 @@ no streaming, no i18n, no monitoring.
 - **A "logged in but not allowed" response is 402/403, never 401.** The web
   client treats 401 as "refresh the session token" and loops. This has now cost
   thinking twice — `byok_key_rejected` and `free_limit_reached`.
+- **A `git worktree` has no `.env`** — it is gitignored, so a "before" harness
+  run taken in one loses the API key, silently drops the contextualiser to
+  `ExtractiveClient`, and reports numbers *worse* than reality, flattering your
+  change. Pin every model in an A/B, not just HyDE:
+  `EURAG_HYDE_MODEL=none EURAG_CONTEXTUALIZE_MODEL=none`.
+- **`display: none` is not a responsive layout.** Hiding the sidebar below
+  720px removed the only route to saved chats, the account, sign out and sign
+  in from every phone. And a control that exists at all widths (even
+  `display: none`) still counts for `:first-child`, which unstyled the masthead
+  title on *desktop* — render wide as well as narrow.
 - **Any per-user gate must cover BOTH logged-in ask paths** — `/query` with a
   bearer token *and* `POST /conversations/{id}/messages` (what saved chats use).
   Go through `api/deps.spend_free_question`; a gate on one door is not a gate.

@@ -32,7 +32,7 @@ numbers is [`docs/DEVLOG.md`](docs/DEVLOG.md); dated decisions and gotchas —
 # env (Python 3.11+; venv already exists at .venv)
 source .venv/bin/activate
 
-# tests — 322 pass / 8 skip, fully offline (hash embedder, no API key needed)
+# tests — 338 pass / 8 skip, fully offline (hash embedder, no API key needed)
 .venv/bin/python -m pytest -q
 EURAG_LIVE_TESTS=1 pytest tests/test_hardening.py -q        # opt-in live LLM test
 EURAG_TEST_DATABASE_URL=postgresql://… pytest tests/test_postgres.py   # opt-in PG parity
@@ -63,13 +63,13 @@ cd frontend/web && npm install && npm run build   # or: npm run dev
 | `core/retrieval/` | `bm25`, `vector_store` (Qdrant), `hybrid_retriever` (RRF + rerank + tenant scope), `reranker`, `expansion` (contextualise + HyDE) |
 | `core/generation/` | `answerer` (cite-or-fail + insufficiency marker), `citations`, `llm_client` |
 | `core/security/` | `auth` (JWT, RBAC, audit), `google_oauth` (ID-token verify), `crypto` (AES-256-GCM), `pii` (upload gate) |
-| `core/` | `pipeline` (wires it together), `registry` (SQLite, tenant+cipher), `db` (SQLite/Postgres), `conversations`, `quota`, `profile`, `config` |
+| `core/` | `pipeline` (wires it together), `registry` (SQLite, tenant+cipher), `db` (SQLite/Postgres), `conversations`, `quota`, `profile`, `smalltalk` (greeting short-circuit), `config` |
 | `api/` | `main`, `deps` (auth/tenant/tier), `routes/*`, `middleware/` (ratelimit, headers) |
 | `data/` | `scrapers/` (eurlex, portals, funding_calls, common), `samples/`, `seed.py` |
 | `frontend/static/` | zero-dep chat UI (local single-user mode) |
 | `frontend/web/` | Next.js app (accounts, Google sign-in, saved chats, tiers, business context, `/privacy` + `/terms`) |
 | `linkedin.md` | public write-up of the project, for publishing — states a timeline and "telemetry not yet read", both of which go stale |
-| `tests/` | unit + integration; `test_security`, `test_tiers`, `test_google_signin`, `test_profile`, `test_chat_import`, `test_followups`, `test_postgres` |
+| `tests/` | unit + integration; `test_security`, `test_tiers`, `test_google_signin`, `test_profile`, `test_chat_import`, `test_followups`, `test_smalltalk`, `test_postgres` |
 
 ## How it works (the load-bearing bits)
 
@@ -339,6 +339,27 @@ Full reasoning, symptoms, and the decisions behind them:
   and live 15 minutes, so `api/deps._still_exists` checks the user row on every
   authenticated request — otherwise a deleted account keeps a working session
   (and a freshly reset free-question quota). Don't remove it to save a lookup.
+- **Retrieval ranks, it never rejects** — so "hello" used to come back with six
+  passages of EU law and an instruction to answer from them (it shipped verbatim
+  Pay Transparency Directive quotes, after ~5 model calls). `core/smalltalk.py`
+  short-circuits greetings at the top of `pipeline.query`: **whole-string match
+  only**, before contextualisation, no retrieval, no model call, and no free
+  question spent (`api.deps.cost_nothing` refunds on all three ask paths).
+  Never loosen it to substring or keyword matching — "hi, do I need a DPO?" must
+  reach retrieval, and answering a real question with the canned reply is far
+  worse than missing a greeting.
+- **A relevance floor cannot be built on the cross-encoder score.** Measured
+  2026-08-11: legitimate German/Polish/Italian questions score **−11.4 to −8.7**,
+  *below* the worst English gibberish — the reranker is English-only, the corpus
+  is not. Any threshold that catches "blah blah" refuses a Polish SME. The score
+  now rides `query outcome:` as `top_score=` so the question is decidable from
+  real traffic; nothing gates on it, and nothing should until a
+  **language-neutral** signal is found (`docs/UPDATE_LOG.md`).
+- **A `git worktree` has no `.env`** (it's gitignored), so a "before" harness run
+  taken in one silently loses the API key, drops the contextualiser to
+  `ExtractiveClient`, and reports numbers *worse* than they are — flattering
+  your change. Pin **every** model in an A/B, not just HyDE:
+  `EURAG_HYDE_MODEL=none EURAG_CONTEXTUALIZE_MODEL=none`.
 - **HyDE / expansion default ON** (Haiku); decomposition is built but ships OFF
   (measured: no gain over HyDE).
 - Two known phrase-precision misses (GDPR Art. 6 lawful-bases, Late Payment
@@ -376,8 +397,10 @@ Standing gaps, in rough priority order:
    full-quality, escalation-enabled answers. `docs/DEPLOY.md` §5.6.
 2. **Escalation cost — count it before tuning it.** The `query outcome:`
    telemetry exists for this and has **not been read against real traffic yet**.
-   The open lever on escalation *count* is that nothing thresholds relevance, so
-   an off-corpus question always reaches the LLM. Full list: HANDOFF item 3.
+   It now also carries `top_score=`. The obvious lever — a relevance floor on
+   that score — was built, measured and **rejected** (English-only reranker; see
+   Gotchas), so what is left needs a language-neutral signal. Full list:
+   HANDOFF item 2.
 3. **Seed lock lives in a bind mount** — move `data/raw/.seed.lock` to
    `/app/var/.seed.lock` so a Linux deploy stops needing a manual
    `chown -R 10001:10001 data/raw`.
@@ -403,6 +426,15 @@ rather than decorative:
   min-content, so one nowrap string makes the page wider than a phone. Do not
   "fix" that class of overflow with `overflow-x: hidden`; it turns it into
   silent clipping.
+- **Below 720px the sidebar is an off-canvas drawer, not `display: none`.**
+  Hiding it is what shipped originally and it took New chat, the saved-chat
+  list, the account and sign-out off every phone — an account that cannot reach
+  its own saved chats. The narrow-screen controls (`.nav-toggle`, `.nav-close`,
+  `.nav-scrim`) are declared `display: none` at the top level and switched on
+  inside the media query, so a new control cannot leak onto the desktop layout.
+  **A control that exists at every width breaks `:first-child` selectors at
+  every width** — the menu button unstyled the masthead title on *desktop* until
+  those rules became `:first-of-type`. Render at 1440 as well as 390/360.
 
 **Checking a mobile layout**: headless Chrome's `--window-size` does **not** set
 the layout viewport (it renders at 500px and crops the screenshot), so a fine

@@ -2,6 +2,91 @@
 
 Running log of build sessions. Newest first.
 
+## 2026-08-11 (smalltalk + mobile navigation) — two bugs found by using it
+
+Both reported from real use: greetings came back with random cited answers, and
+the phone had no menu, so saved chats were unreachable. Reasoning and the
+do-not-reverse notes: [`UPDATE_LOG.md`](UPDATE_LOG.md).
+
+### What "hello" actually cost, measured before the fix
+
+Run against the live pipeline (Sonnet primary, Opus escalation, HyDE on), the
+anonymous tier's exact configuration:
+
+| input | mode | reason | escalated | what shipped |
+|---|---|---|---|---|
+| `hello` | `extractive` | `uncited` | yes | 3 verbatim quotes: Pay Transparency Directive Art. 37, AI Act Art. 113 |
+| `blah blah` | `llm` | `marker` | yes | honest refusal, 0 citations |
+| `how are you doing` | `llm` | `marker` | yes | honest refusal, 0 citations |
+| `what is the weather in Berlin tomorrow` | `llm` | `marker` | yes | honest refusal, 0 citations |
+
+Every one of the four escalated to Opus. `hello` was the quality failure — two
+Sonnet attempts failed citation validation, escalation failed twice more, and
+what shipped was verbatim EU pay-transparency law as the answer to a greeting.
+The other three were *good answers at a bad price*: ~5 model calls to say "I
+can't answer that".
+
+After: `hello` and `how are you doing` cost **0 model calls and 0 retrieval**,
+and spend no free question. Verified end to end against the API —
+`mode: smalltalk`, `anon_remaining` unchanged at 2, while a real question in
+the same session returns `mode: llm` with 2 citations and decrements to 1.
+`blah blah` and the weather question are unchanged by design: their answers
+were already correct, and the only lever on their cost was the relevance floor
+below.
+
+### The relevance floor: built, measured, not shipped
+
+HANDOFF item 2 calls a score threshold "the biggest cost lever on the anonymous
+tier". Top cross-encoder score (`Xenova/ms-marco-MiniLM-L-6-v2`), HyDE pinned
+off, over 60 questions:
+
+| group | n | min | median | max |
+|---|---|---|---|---|
+| golden set (English, on-corpus) | 32 | −7.85 | 3.40 | 8.33 |
+| terse but on-corpus English | 8 | −3.48 | 5.52 | 8.32 |
+| off-corpus / gibberish (English) | 16 | −11.11 | −8.99 | −3.70 |
+| legitimate DE/FR/ES/IT/NL/PL/SV/PT/DA | 12 | **−11.38** | −9.03 | 2.49 |
+
+English-only, a threshold near −8.5 separates the classes. Adding the fourth
+row makes the distributions **inseparable**: legitimate non-English questions
+score at or below the worst English gibberish, because the cross-encoder is
+trained on English MS MARCO. Individual casualties a floor would have created:
+"Welche Zinsen kann ich bei Zahlungsverzug berechnen?" (−11.38), "Czy muszę
+zgłosić naruszenie ochrony danych osobowych?" (−11.31), "Quali sistemi di IA
+sono considerati ad alto rischio?" (−10.71).
+
+Shipped instead: `top_score` on the `query outcome:` line, so the decision can
+be made from production traffic. Nothing gates on it.
+
+### Retrieval numbers (standing rule 1)
+
+`retrieve()` is now a thin wrapper over `retrieve_scored()`; ranking is
+untouched, and the harness confirms it. Both runs pinned with
+`EURAG_HYDE_MODEL=none EURAG_CONTEXTUALIZE_MODEL=none`, k=6, 32 cases:
+
+| | doc_hit | doc_mrr | phrase_hit | compound_hit |
+|---|---|---|---|---|
+| before (HEAD, worktree) | 94% | 0.94 | 87% | 67% |
+| after | 94% | 0.94 | 87% | 67% |
+
+Identical. The first attempt at this comparison was invalid and worth
+recording: an unpinned contextualiser flipped one case (phrase_hit 90% vs 94%),
+and a worktree without `.env` flipped three more (doc_hit 94% vs 100%) by
+silently disabling the contextualiser entirely. Both directions flattered the
+change.
+
+### Mobile navigation
+
+The sidebar was `display: none` below 720px with nothing in its place. It is
+now an off-canvas drawer with a scrim and a masthead hamburger. Rendered and
+checked at 390 and 360 (iframe wrapper, since headless Chrome's `--window-size`
+does not set the layout viewport) and at 1440 — the last of which caught a
+regression the phone widths could not: the menu button became `.pane-head`'s
+first child at every width, so `span:first-child` stopped matching the title
+and unstyled it on **desktop**.
+
+Tests: 322 → **338 pass / 8 skip**.
+
 ## 2026-08-10 (visual identity) — black ink on bond paper
 
 Redesigned to a legal-instrument look: bond white, wet black, hairline and
