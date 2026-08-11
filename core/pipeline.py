@@ -20,6 +20,8 @@ from core.retrieval.reranker import get_reranker
 from core.retrieval.vector_store import VectorStore
 from core.security import pii
 from core.security.crypto import get_cipher
+from core.smalltalk import REPLY as SMALLTALK_REPLY
+from core.smalltalk import is_smalltalk
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +186,20 @@ class Pipeline:
         `profile` is the asker's business context. It reaches the answerer only
         — retrieval never sees it — so it changes how an answer is framed, never
         which chunks were found."""
+        # "hello" is not a question about the corpus, but retrieval has no way
+        # to say so — BM25 and vector search rank, they never reject — so it
+        # came back with six passages of EU law and an instruction to answer
+        # from them. Measured on the live pipeline: "hello" cost a HyDE call,
+        # two Sonnet attempts, an Opus escalation and two more attempts, and
+        # shipped three verbatim quotes from the Pay Transparency Directive as
+        # the answer (DEVLOG 2026-08-11). This runs FIRST — ahead of
+        # contextualisation, so "thanks" at the end of a thread is not rewritten
+        # into a full question and then answered at random — and costs nothing.
+        if is_smalltalk(question):
+            result = AnswerResult(answer=SMALLTALK_REPLY, mode="smalltalk")
+            self._log_outcome(result, primary_reason=None, profile=profile, top_score=None)
+            return result
+
         if history and self.contextualizer is not None:
             question = self.contextualizer.standalone(question, history)
 
@@ -239,27 +255,53 @@ class Pipeline:
             else:
                 deeper.escalated = True
                 result = deeper
-        # ONE line per query, unconditionally — this is the denominator. Every
-        # other per-query log fires only on a branch (escalation, a failed
-        # rewrite), so counting escalations against them gave a ratio with no
-        # bottom. Keep it ASCII: the first attempt to grep the escalation log
-        # failed partly on the em dash in the line above.
-        #
-        # The profile rides this line rather than a branch-conditional one of
-        # its own (which is what the old "query industry context:" line was), so
-        # that "which sectors actually ask questions" is countable against the
-        # same denominator as everything else.
+        self._log_outcome(
+            result,
+            primary_reason=primary_reason,
+            profile=profile,
+            top_score=result.top_score,
+        )
+        return result
+
+    def _log_outcome(
+        self,
+        result: AnswerResult,
+        primary_reason: str | None,
+        profile: BusinessProfile | None,
+        top_score: float | None,
+    ) -> None:
+        """ONE line per query, unconditionally — this is the denominator. Every
+        other per-query log fires only on a branch (escalation, a failed
+        rewrite), so counting escalations against them gave a ratio with no
+        bottom. Keep it ASCII: the first attempt to grep the escalation log
+        failed partly on the em dash in the escalation line.
+
+        The profile rides this line rather than a branch-conditional one of its
+        own (which is what the old "query industry context:" line was), so that
+        "which sectors actually ask questions" is countable against the same
+        denominator as everything else. `top_score` is here for the same
+        reason: a relevance floor is the open lever on escalation cost, and it
+        cannot be calibrated from a laptop — the local measurement says a
+        threshold that catches gibberish also refuses legitimate non-English
+        questions, so what the next session needs is this number against real
+        traffic, not another guess (DEVLOG 2026-08-11).
+
+        Every early return in `query` comes through here, so a short-circuited
+        answer still counts in the denominator. It must: an anonymous visitor
+        typing "hello" is traffic, and a count that silently dropped it would
+        overstate the escalation rate.
+        """
         logger.info(
             "query outcome: mode=%s escalated=%s primary_reason=%s "
-            "insufficient=%s citations=%d profile=%s",
+            "insufficient=%s citations=%d profile=%s top_score=%s",
             result.mode,
             result.escalated,
             primary_reason or "none",
             result.insufficient,
             len(result.citations),
             (profile or BusinessProfile()).log_summary(),
+            "none" if top_score is None else f"{top_score:.2f}",
         )
-        return result
 
     def _answer(
         self,
@@ -273,11 +315,13 @@ class Pipeline:
         # note the profile is NOT passed to retrieve(): retrieval is deliberately
         # blind to the asker's context, so this stays an answer-side change and
         # the harness numbers keep their meaning
-        chunk_ids = self.retriever.retrieve(
+        chunk_ids, top_score = self.retriever.retrieve_scored(
             question, k=k, max_per_doc=max_per_doc, tenants=tenants
         )
         chunks = self.registry.get_chunks(chunk_ids, tenants)
-        return answer_question(question, chunks, llm, profile=profile)
+        result = answer_question(question, chunks, llm, profile=profile)
+        result.top_score = top_score
+        return result
 
     def close(self) -> None:
         self.vectors.close()

@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from api.deps import (
     allowed_tenants,
     client_ip,
+    cost_nothing,
     optional_principal,
     paid_tier,
     refund_free_question,
@@ -187,6 +188,12 @@ def query(
             # never answered — give it back before the error handler responds
             app.state.anon_quota.refund(key)
             raise
+        # ...and give it back when no model was called at all. A greeting gets
+        # a canned reply for free; charging one of two free questions for it
+        # would trade the random-answer bug for a shorter free trial.
+        if cost_nothing(result):
+            app.state.anon_quota.refund(key)
+            remaining += 1
         result["tier"] = "anonymous"
         result["anon_remaining"] = remaining
         return result
@@ -207,6 +214,13 @@ def query(
     except LLMUnavailableError:
         refund_free_question(request, principal, plan)
         raise
+    # no model call, no charge — the same rule as the anonymous branch above
+    # and as /conversations/{id}/messages, because a per-user gate that behaves
+    # differently on the two logged-in ask paths is a gate on one door
+    if cost_nothing(result):
+        refund_free_question(request, principal, plan)
+        if free_remaining is not None:
+            free_remaining += 1
     result["tier"] = plan["tier"]
     if free_remaining is not None:
         result["free_remaining"] = free_remaining

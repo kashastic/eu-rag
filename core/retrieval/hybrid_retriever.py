@@ -50,7 +50,30 @@ class HybridRetriever:
         max_per_doc: int = 2,
         tenants: list[str] | None = None,
     ) -> list[str]:
-        """Returns fused chunk_ids, best first, scoped to `tenants`.
+        """Chunk ids only. See `retrieve_scored` for the relevance signal."""
+        return self.retrieve_scored(
+            query, k=k, max_per_doc=max_per_doc, tenants=tenants
+        )[0]
+
+    def retrieve_scored(
+        self,
+        query: str,
+        k: int = 6,
+        max_per_doc: int = 2,
+        tenants: list[str] | None = None,
+    ) -> tuple[list[str], float | None]:
+        """Returns (fused chunk_ids best first, best cross-encoder score).
+
+        The score is the retriever's answer to "is anything here actually
+        relevant", which the ranking alone cannot give: RRF ranks by relative
+        position and the cross-encoder only reorders, so k chunks come back for
+        "hello" exactly as they do for a real question. `core.pipeline` uses it
+        as a floor.
+
+        It is **None whenever there is nothing to judge with** — no reranker
+        configured, or the reranker failed to load (`get_reranker` degrades to
+        None by design). Callers must treat None as "no opinion" and answer
+        anyway: a missing model must never turn into a refused answer.
 
         With a reranker, a larger fused pool is reordered by joint
         query/passage scoring before the top-k cut — fusion recall decides
@@ -74,13 +97,16 @@ class HybridRetriever:
             [cid for cid, _ in rrf_fuse(rankings)] if len(rankings) > 1 else rankings[0]
         )
 
+        top_score: float | None = None
         if reranking:
             # get_chunks enforces tenancy: a foreign chunk_id from the global
             # BM25 index is dropped here before it can be reranked or returned
             chunks = self.get_chunks(fused, tenants)
             # rerank against the original question — sub-queries only widen recall
-            order = self.reranker.rank(query, [c.text for c in chunks])
-            fused = [chunks[i].chunk_id for i in order]
+            scored = self.reranker.rank_scored(query, [c.text for c in chunks])
+            fused = [chunks[i].chunk_id for i, _ in scored]
+            if scored:
+                top_score = scored[0][1]
 
         picked: list[str] = []
         per_doc: dict[str, int] = {}
@@ -91,13 +117,13 @@ class HybridRetriever:
             picked.append(cid)
             per_doc[doc_id] = per_doc.get(doc_id, 0) + 1
             if len(picked) == k:
-                return picked
+                return picked, top_score
         for cid in fused:
             if len(picked) == k:
                 break
             if cid not in picked:
                 picked.append(cid)
-        return picked
+        return picked, top_score
 
     def _fused(self, query: str, pool: int, tenants: list[str] | None = None) -> list[str]:
         """BM25 + vector rankings for one query, RRF-fused. HyDE rewrites

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from api.deps import (
     allowed_tenants,
+    cost_nothing,
     current_principal,
     paid_tier,
     refund_free_question,
@@ -190,6 +191,12 @@ def ask(conv_id: str, body: Ask, request: Request, p: Principal = Depends(curren
     except LLMUnavailableError:
         refund_free_question(request, p, plan)
         raise
+    # no model call, no charge — same rule as the anonymous path, so "hello"
+    # costs a free-tier user nothing whichever door they came in through
+    if cost_nothing(result):
+        refund_free_question(request, p, plan)
+        if free_remaining is not None:
+            free_remaining += 1
     result["tier"] = plan["tier"]
     if free_remaining is not None:
         result["free_remaining"] = free_remaining

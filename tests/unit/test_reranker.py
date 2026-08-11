@@ -17,12 +17,20 @@ class _NullEmbedder:
 
 
 class _ReverseReranker:
-    """Deterministic fake: prefers the candidate fusion ranked last."""
+    """Deterministic fake: prefers the candidate fusion ranked last.
+
+    Mirrors the real class's shape — `rank_scored` is the primary and `rank`
+    is derived from it — because the retriever reads the scores now, not just
+    the order (they are what the relevance floor is judged against).
+    """
 
     name = "reverse"
 
+    def rank_scored(self, query, texts):
+        return [(i, float(i)) for i in reversed(range(len(texts)))]
+
     def rank(self, query, texts):
-        return list(reversed(range(len(texts))))
+        return [i for i, _ in self.rank_scored(query, texts)]
 
 
 def _chunk(chunk_id: str, text: str) -> Chunk:
@@ -66,6 +74,33 @@ def test_per_doc_cap_applies_after_reranking():
     ids = retriever.retrieve("widget rules", k=3)
     assert sum(cid.startswith("docA:") for cid in ids) <= 2
     assert "docB:0" in ids
+
+
+def test_retrieve_scored_reports_the_best_score():
+    """The score is the only signal that says whether the top chunk is relevant
+    at all, as opposed to merely first. It rides the `query outcome:` line so
+    the question can be settled against real traffic — a local calibration
+    found no threshold that separates off-corpus English from legitimate
+    non-English questions (DEVLOG 2026-08-11), so nothing gates on it yet."""
+    chunks = {f"doc{i}:0": f"widget rules {'relevant ' * (5 - i)}" for i in range(4)}
+
+    ids, score = _retriever(chunks, _ReverseReranker()).retrieve_scored(
+        "widget rules relevant", k=4
+    )
+
+    assert ids  # unchanged behaviour: the ids still come back
+    assert score == 3.0  # _ReverseReranker scores its winner highest
+
+
+def test_retrieve_scored_has_no_opinion_without_a_reranker():
+    """None means "no signal", and callers must answer anyway. `get_reranker`
+    degrades to None when the model can't be loaded, and a missing model must
+    never turn into a refused answer."""
+    chunks = {"doc0:0": "widget rules relevant"}
+
+    _, score = _retriever(chunks, reranker=None).retrieve_scored("widget rules", k=4)
+
+    assert score is None
 
 
 def test_get_reranker_none_and_unavailable_model():

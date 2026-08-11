@@ -14,6 +14,7 @@ later (`_still_exists`).
 
 from fastapi import Depends, Header, HTTPException, Request
 
+from core.generation.answerer import MODES_REFUNDED
 from core.registry import PUBLIC_TENANT
 from core.security.auth import AuthError, AuthStore, LOCAL_PRINCIPAL, Principal
 
@@ -164,6 +165,24 @@ def refund_free_question(request: Request, principal: Principal, plan: dict) -> 
     refund — same parallel-overrun safety, same reason)."""
     if plan["tier"] == "free" and request.app.state.user_quota is not None:
         request.app.state.user_quota.refund(principal.username)
+
+
+def cost_nothing(result: dict) -> bool:
+    """True when this answer must not be charged to a question allowance.
+
+    The quota exists to bound what the server's Anthropic key can be made to
+    spend, so an answer that spent nothing has nothing to charge for: a canned
+    reply to "hello" must not consume one of an anonymous visitor's two free
+    questions, or the fix for the greeting bug becomes a second, worse bug.
+
+    Reads `mode` because that is the field both ask paths already have in the
+    response dict, and the set lives with the mode definitions in
+    `core.generation.answerer` so a newly added mode has to be classified
+    rather than defaulting to refundable by silence. Applies to BOTH logged-in
+    ask paths and the anonymous one — a rule enforced on one door is not a
+    rule.
+    """
+    return result.get("mode") in MODES_REFUNDED
 
 
 def require_admin(principal: Principal = Depends(current_principal)) -> Principal:

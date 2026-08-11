@@ -55,11 +55,27 @@ INSUFFICIENT_MARKER = "INSUFFICIENT_SOURCES"
 MAX_UNCITED_REFUSAL_CHARS = 600
 
 
+# Modes the routes refund a free question for: the answer was produced without
+# calling a model, so there is nothing to charge for. Charging one of an
+# anonymous visitor's two questions for a canned reply to "hello" would trade
+# the random-answer bug for a shorter free trial.
+#
+# **Deliberately narrower than "every mode that skipped the model".**
+# `no_sources` skips it too, but it only fires when the index is empty — an
+# operator failure, not something a user can ask for — and in that state the
+# refund is unobservable in production (prod serves 47 documents) while
+# changing what nine quota tests assert about the cost gate. The gate on the
+# owner's Anthropic bill is not worth loosening for a case that means the
+# deployment is already broken. A new mode has to be listed here explicitly;
+# silence means chargeable.
+MODES_REFUNDED = frozenset({"smalltalk"})
+
+
 @dataclass
 class AnswerResult:
     answer: str
     citations: list[Citation] = field(default_factory=list)
-    mode: str = "llm"  # llm | extractive | no_sources
+    mode: str = "llm"  # llm | extractive | no_sources | smalltalk
     insufficient: bool = False  # sources didn't answer the core question
     escalated: bool = False  # answered by the escalation model
     # WHY the answer was insufficient, for telemetry only — the escalation gate
@@ -70,6 +86,14 @@ class AnswerResult:
     # They want different fixes ("marker" wants deeper retrieval, "uncited"
     # wants a better prompt), and until now the log couldn't distinguish them.
     insufficient_reason: str | None = None
+    # Best cross-encoder score behind this answer, for telemetry only (set by
+    # the pipeline, never by the answerer, and absent when no reranker is
+    # loaded). It is the only number that says how relevant the retrieved
+    # chunks actually were, as opposed to how they ranked against each other.
+    # NOT used as a gate: measured on this corpus, legitimate non-English
+    # questions score BELOW off-corpus English ones, because the cross-encoder
+    # is English-only (DEVLOG 2026-08-11).
+    top_score: float | None = None
 
     def to_dict(self) -> dict:
         # insufficient_reason is deliberately NOT exposed: it is an internal

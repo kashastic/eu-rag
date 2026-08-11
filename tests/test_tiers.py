@@ -110,6 +110,26 @@ def test_anonymous_gets_three_then_login_wall(client):
     assert walled.json()["detail"]["code"] == "anonymous_limit_reached"
 
 
+def test_a_greeting_does_not_spend_an_anonymous_question(client):
+    """No model call, no charge.
+
+    The anonymous allowance is two questions, and it exists to bound what a
+    public URL can spend on the owner's Anthropic key. A greeting spends
+    nothing — it is answered from a constant — so charging for it would trade
+    the random-answer bug for a shorter free trial.
+    """
+    r = client.post("/query", json={"question": "hello"})
+
+    assert r.status_code == 200
+    assert r.json()["mode"] == "smalltalk"
+    assert r.json()["anon_remaining"] == 3  # untouched
+
+    # ...and the allowance is genuinely still there, not merely reported
+    for _ in range(3):
+        assert client.post("/query", json={"question": "SME thresholds?"}).status_code == 200
+    assert client.post("/query", json={"question": "SME thresholds?"}).status_code == 401
+
+
 def test_anon_quota_key_ignores_forwarded_for_by_default(client):
     """The free-question allowance is per IP — a spoofable header must not be
     able to hand out fresh allowances when we aren't behind a proxy."""
@@ -264,6 +284,34 @@ def test_the_saved_chat_route_shares_the_same_allowance(free_client):
     )
     assert walled.status_code == 402
     assert walled.json()["detail"]["code"] == "free_limit_reached"
+
+
+def test_a_greeting_does_not_spend_a_free_users_allowance_on_either_path(free_client):
+    """Both logged-in ask paths, same rule.
+
+    The free allowance is for the lifetime of the account, so a question spent
+    on "hello" is gone for good. And a refund present on one of the two doors
+    is the same class of bug as a gate present on one of them.
+    """
+    tok = _account(free_client, "grace")
+    conv = free_client.post("/conversations", json={}, headers=_bearer(tok)).json()
+
+    direct = free_client.post("/query", json={"question": "hello"}, headers=_bearer(tok))
+    assert direct.json()["mode"] == "smalltalk"
+    assert direct.json()["free_remaining"] == 2  # of 2
+
+    saved = free_client.post(
+        f"/conversations/{conv['id']}/messages",
+        json={"question": "thanks"}, headers=_bearer(tok),
+    )
+    assert saved.json()["mode"] == "smalltalk"
+    assert saved.json()["free_remaining"] == 2
+
+    # the account agrees — the refund hit the store, not just the response
+    assert free_client.get("/account", headers=_bearer(tok)).json()["free_remaining"] == 2
+    # and a real question still costs one
+    free_client.post("/query", json={"question": "SME thresholds?"}, headers=_bearer(tok))
+    assert free_client.get("/account", headers=_bearer(tok)).json()["free_remaining"] == 1
 
 
 def test_byok_bypasses_the_allowance_and_does_not_spend_it(free_client):

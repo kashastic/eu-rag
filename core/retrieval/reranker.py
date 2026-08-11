@@ -17,6 +17,17 @@ class Reranker(Protocol):
         """Indices into texts, best first."""
         ...
 
+    def rank_scored(self, query: str, texts: list[str]) -> list[tuple[int, float]]:
+        """(index, score) pairs, best first.
+
+        Same work as `rank`, without discarding the scores. Ranking answers
+        "which passage is most relevant"; only the score can answer "is the
+        most relevant passage relevant *at all*", which is what the relevance
+        floor in core.pipeline needs — retrieval otherwise always returns k
+        chunks, however little they have to do with the question.
+        """
+        ...
+
 
 class CrossEncoderReranker:
     """batch_size caps how many query/passage pairs are scored in one forward
@@ -34,10 +45,17 @@ class CrossEncoderReranker:
         self.name = f"fastembed-cross-encoder:{model_name}"
 
     def rank(self, query: str, texts: list[str]) -> list[int]:
+        return [i for i, _ in self.rank_scored(query, texts)]
+
+    def rank_scored(self, query: str, texts: list[str]) -> list[tuple[int, float]]:
+        # raw cross-encoder logits, not probabilities: strongly positive for a
+        # passage that answers the query, strongly negative for one that does
+        # not. The gap is what the relevance floor is calibrated against.
         scores = list(
             self._model.rerank(query, texts, batch_size=self._batch_size)
         )
-        return sorted(range(len(texts)), key=lambda i: scores[i], reverse=True)
+        order = sorted(range(len(texts)), key=lambda i: scores[i], reverse=True)
+        return [(i, float(scores[i])) for i in order]
 
 
 def get_reranker(spec: str, batch_size: int = 8) -> Reranker | None:
