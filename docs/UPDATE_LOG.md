@@ -20,6 +20,55 @@ them. Don't paste the same paragraph into three files — link.
 
 ---
 
+## 2026-08-11 (The solved Turnstile widget never gave its space back)
+
+### [GOTCHA] "Interaction-only" hides the widget until it is used, not after
+
+Reported as: the Cloudflare check appears once, and **stays on screen after it
+has been verified**, eating composer space for the rest of the session.
+
+`.turnstile` had `display: flex` and **no height rule at all**, so the
+container's footprint was whatever iframe Cloudflare had last put in it.
+`.active` added `margin-bottom: 12px` and nothing else. The component comment
+claimed the container "is a 0px box until a challenge is actually painted into
+it" — that was true only because Cloudflare renders *nothing* until a challenge
+is needed. It says nothing about afterwards: a solved challenge leaves its
+~65px success state in the container, and `setChallengeVisible(false)` took
+back a margin while the widget itself stayed exactly where it was.
+
+Measured (headless, container height): idle **0px**; a 65px child with the
+class absent, under the old CSS **65px**; under the new CSS **0px**.
+
+**Fix, in two classes rather than one**, because "might paint something" and
+"is asking the visitor for something" are different moments:
+
+- `.turnstile` — `height: 0; overflow: hidden`. The default. Whatever
+  Cloudflare leaves behind takes no room.
+- `.turnstile.open` — `height: auto; overflow: visible`. Applied for the whole
+  in-flight window (`busy || interactive`), not just while interactive.
+- `.turnstile.active` — the 12px spacing, only when a challenge is really up.
+
+**Why `.open` is driven by in-flight and not by `before-interactive-callback`
+alone.** Hanging *visibility* on that callback would mean a challenge painted
+without it firing is clipped to nothing: an invisible challenge the visitor
+cannot solve, and a submit that hangs until the 120s timeout. That is strictly
+worse than the leftover widget being fixed, and it is the same family as the
+two earlier bot-gate failures (a checkbox that disabled Ask, a `/login` form
+gated on a widget it never rendered). Opening the box for the whole window
+costs nothing — on the ordinary path Cloudflare's content is 0px tall, measured
+`h=0.0` with the class applied.
+
+Collapsed with `height: 0` rather than `display: none` or
+`visibility: hidden` **on purpose**: Turnstile can fail when its widget is
+removed from rendering, and the collapsed state has to stay executable. Don't
+"simplify" it.
+
+**What is NOT verified locally:** headless Chrome never loads
+`challenges.cloudflare.com` (`iframes=0` in every probe), so the real widget
+could not be exercised end to end — only the CSS mechanics and the class
+transitions, which are now pinned by tests parsing the CSS and the component.
+The end-to-end behaviour needs a real browser against the deployed site.
+
 ## 2026-08-11 (Greetings got random answers; the phone had no menu)
 
 ### [DECISION] "hello" is answered from a constant, before retrieval

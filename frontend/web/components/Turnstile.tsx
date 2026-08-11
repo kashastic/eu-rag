@@ -121,9 +121,28 @@ export const Turnstile = forwardRef<
   // resolves to the widget id; rejects if the widget could never be rendered
   const widget = useRef<Promise<string> | null>(null);
   const pending = useRef<Pending | null>(null);
-  // drives the container's own spacing: it is a 0px box until a challenge is
-  // actually painted into it
+  // Drives the container's footprint via the `active` class: `.turnstile` is
+  // height:0/overflow:hidden and only `.turnstile.active` takes up room (see
+  // globals.css). This state is therefore the ONLY thing that decides whether
+  // the widget occupies space — deliberately, because Cloudflare leaves its
+  // ~65px success state in the container after a solved challenge, and reading
+  // the space back from the iframe is not something we can do.
+  //
+  // Every terminal outcome must clear it or the composer keeps a dead widget
+  // above it for the rest of the session: `settle()` does that for resolve,
+  // error, expiry and timeout, and after-interactive-callback covers a
+  // challenge that comes down without settling.
   const [interactive, setInteractive] = useState(false);
+  // True from the moment a challenge is requested until it settles. The
+  // container is given room for this whole window, not just while `interactive`
+  // is set, so a challenge that paints WITHOUT firing
+  // before-interactive-callback is still visible and solvable. Relying on that
+  // callback for visibility would turn a missed callback into an invisible
+  // challenge the visitor cannot solve — a hung submit, which is worse than the
+  // leftover widget this collapse exists to remove. It costs nothing on the
+  // ordinary path: Cloudflare's non-interactive content is 0px tall, so "give
+  // it room" and "collapsed" render identically.
+  const [busy, setBusy] = useState(false);
   const onInteractiveRef = useRef(onInteractive);
   onInteractiveRef.current = onInteractive;
 
@@ -140,8 +159,12 @@ export const Turnstile = forwardRef<
       if (!current) return;
       pending.current = null;
       clearTimeout(current.timer);
-      // a timed-out or errored challenge may never send after-interactive
+      // a timed-out or errored challenge may never send after-interactive.
+      // Both flags drop here, which is what takes the widget's space back:
+      // Cloudflare leaves its success state in the container after a solved
+      // challenge and never reclaims it itself.
       setChallengeVisible(false);
+      setBusy(false);
       apply(current);
     },
     [setChallengeVisible]
@@ -192,6 +215,7 @@ export const Turnstile = forwardRef<
         CHALLENGE_TIMEOUT_MS
       );
       pending.current = { resolve, reject, timer };
+      setBusy(true);
       try {
         // tokens are single-use, so every submit starts from a clean widget
         window.turnstile?.reset(id);
@@ -204,5 +228,14 @@ export const Turnstile = forwardRef<
 
   useImperativeHandle(ref, () => ({ getToken }), [getToken]);
 
-  return <div ref={container} className={"turnstile" + (interactive ? " active" : "")} />;
+  return (
+    <div
+      ref={container}
+      className={
+        "turnstile" +
+        (busy || interactive ? " open" : "") +
+        (interactive ? " active" : "")
+      }
+    />
+  );
 });

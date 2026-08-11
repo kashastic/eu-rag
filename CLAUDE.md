@@ -32,7 +32,7 @@ numbers is [`docs/DEVLOG.md`](docs/DEVLOG.md); dated decisions and gotchas —
 # env (Python 3.11+; venv already exists at .venv)
 source .venv/bin/activate
 
-# tests — 338 pass / 8 skip, fully offline (hash embedder, no API key needed)
+# tests — 342 pass / 8 skip, fully offline (hash embedder, no API key needed)
 .venv/bin/python -m pytest -q
 EURAG_LIVE_TESTS=1 pytest tests/test_hardening.py -q        # opt-in live LLM test
 EURAG_TEST_DATABASE_URL=postgresql://… pytest tests/test_postgres.py   # opt-in PG parity
@@ -287,6 +287,16 @@ Full reasoning, symptoms, and the decisions behind them:
   submit). **Never re-gate a button on it solving** — the old always-visible
   widget put a checkbox above the composer on every page load and left Ask *and*
   Create-account dead with no error whenever the challenge couldn't run.
+- **The widget's footprint is ours to control, not Cloudflare's.**
+  `interaction-only` hides it until a challenge is *needed*; it says nothing
+  about afterwards, and a solved challenge leaves its ~65px success state in the
+  container forever. `.turnstile` is therefore `height: 0; overflow: hidden`,
+  opened by `.open` for the **whole in-flight window** (`busy || interactive`,
+  not `interactive` alone — a challenge painted without
+  `before-interactive-callback` must still be solvable) and spaced by `.active`.
+  Collapse with height, never `display: none` / `visibility: hidden`: Turnstile
+  can fail when its widget is removed from rendering. Guarded by tests that
+  parse the CSS, because the web app has no test runner.
 - **The bot gate is skipped when no `EURAG_TURNSTILE_SECRET` is set**, so an
   auth-flow bug can be invisible locally and fatal in prod (that is how
   `/login` shipped unable to register). Rehearse with Cloudflare's test keys —

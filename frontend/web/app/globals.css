@@ -366,8 +366,36 @@ a { color: var(--ink); text-underline-offset: 2px; }
 .modal .profile-fields { margin-top: 18px; }
 .modal .profile-fields + .btn { margin-top: 22px; }
 
-/* ---------- bot gate ---------- */
-.turnstile { display: flex; justify-content: center; }
+/* ---------- bot gate ----------
+   The widget occupies space ONLY while Cloudflare has an interactive challenge
+   on screen. Everything else about the container is sized by us, not by
+   whatever iframe Cloudflare last left in it.
+
+   This used to be `display:flex` with no height rule and a margin on .active,
+   on the assumption that an "interaction-only" widget shrinks itself back to
+   nothing once solved. It does not: after a challenge had been shown and
+   passed, Cloudflare's ~65px success state stayed in the container, sitting
+   above the composer for the rest of the session. `setChallengeVisible(false)`
+   removed a 12px margin and nothing else, so nothing ever reclaimed the space.
+
+   Collapsed with height:0 + overflow:hidden rather than `display:none` or
+   `visibility:hidden` on purpose — Turnstile can fail when its widget is
+   removed from rendering, and this keeps it rendered and executable while
+   taking no room.
+
+   Two classes, because "might paint something" and "is asking the visitor for
+   something" are different moments and only the second deserves spacing:
+
+     .open   — a challenge is in flight OR interactive. Gives the widget room.
+               Costs nothing on the ordinary path, where Cloudflare's own
+               content is 0px tall, and it does NOT depend on
+               before-interactive-callback firing — so a challenge that paints
+               without announcing itself is still visible and solvable rather
+               than clipped to nothing.
+     .active — Cloudflare actually put a challenge on screen. Adds the spacing
+               that separates it from the composer. */
+.turnstile { display: flex; justify-content: center; height: 0; overflow: hidden; }
+.turnstile.open { height: auto; overflow: visible; }
 .turnstile.active { margin-bottom: 12px; }
 
 .spin { display: inline-block; }

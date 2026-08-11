@@ -1,7 +1,7 @@
 # HANDOFF — continue here
 
 **As of:** 2026-08-11 · **EURAG is LIVE** at <https://eurag.duckdns.org> ·
-**338 tests pass, 8 skipped** locally.
+**342 tests pass, 8 skipped** locally.
 
 > **The 2026-08-10 batch is deployed and verified live** (the "four commits
 > pushed, none deployed" box is gone because it was checked, not because it was
@@ -23,7 +23,7 @@ Start by confirming where things stand, not by looking for pending work:
 
 ```bash
 git status --short && git log --oneline -1     # expect: clean
-.venv/bin/python -m pytest -q                  # expect: 338 passed, 8 skipped
+.venv/bin/python -m pytest -q                  # expect: 342 passed, 8 skipped
 curl -s https://eurag.duckdns.org/healthz | python3 -m json.tool
 ```
 

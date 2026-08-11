@@ -85,7 +85,37 @@ regression the phone widths could not: the menu button became `.pane-head`'s
 first child at every width, so `span:first-child` stopped matching the title
 and unstyled it on **desktop**.
 
-Tests: 322 → **338 pass / 8 skip**.
+### The solved Turnstile widget never gave its space back
+
+Reported after the mobile fix: the Cloudflare check appears once and stays on
+screen after it has been verified. `.turnstile` had no height rule at all, so
+the container was sized by whatever iframe Cloudflare had last put in it, and
+`.active` only ever controlled a 12px margin. `interaction-only` hides the
+widget until a challenge is *needed*; it says nothing about afterwards, and a
+solved challenge leaves its ~65px success state behind.
+
+Container height, measured headless at 390px wide:
+
+| state | old CSS | new CSS |
+|---|---|---|
+| idle, no challenge yet | 0px | 0px |
+| challenge in flight (non-interactive) | 0px | 0px (`.open` applied) |
+| 65px child, class absent — *the leftover success widget* | **65px** | **0px** |
+
+Split into `.open` (in flight **or** interactive — gives room) and `.active`
+(interactive — adds spacing) so that visibility never depends on
+`before-interactive-callback` firing: an invisible unsolvable challenge would
+be a worse bug than the one being fixed, and it is the same family as the two
+earlier bot-gate failures.
+
+**Not verified locally:** headless Chrome never loads
+`challenges.cloudflare.com` — `iframes=0` in every probe, with both the
+always-pass (`1x…AA`) and force-interactive (`3x…FF`) test keys — so the real
+widget could not be exercised end to end. The CSS mechanics and the class
+transitions are pinned by tests that parse `globals.css` and `Turnstile.tsx`,
+since the web app has no test runner.
+
+Tests: 322 → **342 pass / 8 skip**.
 
 ## 2026-08-10 (visual identity) — black ink on bond paper
 

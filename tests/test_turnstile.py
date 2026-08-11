@@ -120,3 +120,82 @@ def test_logged_in_query_not_gated(client, monkeypatch):
         headers={"Authorization": f"Bearer {tok}"},
     )
     assert r.status_code == 200 and r.json()["tier"] == "free"
+
+
+# --- the widget's footprint in the web app ---------------------------------
+#
+# Parsed from the CSS because the web app has no test runner, and this exact
+# class of bug has now shipped three times: an always-visible checkbox that
+# disabled Ask and Create-account, a /login form gated on a widget it never
+# rendered, and a solved challenge whose success state stayed above the
+# composer for the rest of the session. All three were invisible locally,
+# because with no EURAG_TURNSTILE_SECRET the gate is skipped entirely.
+
+import pathlib
+import re
+
+REPO = pathlib.Path(__file__).resolve().parent.parent
+
+
+def _css() -> str:
+    return (REPO / "frontend/web/app/globals.css").read_text()
+
+
+def _rule(css: str, selector: str) -> str:
+    """The declaration block for an exact selector."""
+    match = re.search(
+        r"(?m)^" + re.escape(selector) + r"\s*\{([^}]*)\}", css
+    )
+    assert match, f"no rule found for {selector}"
+    return match.group(1)
+
+
+def test_widget_takes_no_space_unless_a_challenge_is_on_screen():
+    """Cloudflare leaves its ~65px success state in the container after a
+    solved challenge, so the container's footprint has to be driven by our own
+    `active` class or the widget never gives the space back. It sat above the
+    composer for the rest of the session until this rule existed."""
+    base = _rule(_css(), ".turnstile")
+
+    assert "height: 0" in base
+    assert "overflow: hidden" in base
+
+
+def test_a_running_challenge_is_visible_and_unclipped():
+    """The other half: while a challenge is in flight it must have room and
+    must not be clipped — Turnstile's interactive challenge can expand beyond
+    the widget box, so overflow comes back with the height.
+
+    This is `.open` (in flight OR interactive) rather than `.active`
+    (interactive) on purpose. Hanging visibility on the interactive flag alone
+    would mean a challenge that paints without firing
+    before-interactive-callback is clipped to nothing — an unsolvable invisible
+    challenge and a hung submit, which is worse than the leftover widget the
+    collapse exists to remove."""
+    openrule = _rule(_css(), ".turnstile.open")
+
+    assert "height: auto" in openrule
+    assert "overflow: visible" in openrule
+
+
+def test_the_widget_is_never_hidden_with_display_or_visibility():
+    """Turnstile can fail outright when its widget is removed from rendering,
+    and the challenge must stay executable while collapsed. Collapsing is
+    height-based on purpose; don't 'simplify' it to display:none."""
+    for selector in (".turnstile", ".turnstile.open", ".turnstile.active"):
+        block = _rule(_css(), selector)
+        assert "display: none" not in block
+        assert "visibility: hidden" not in block
+
+
+def test_the_component_opens_the_box_for_every_challenge_it_runs():
+    """The CSS is only half the contract — `.open` has to actually be applied
+    for the whole in-flight window, and dropped when the challenge settles.
+    Parsed from the component because the web app has no test runner."""
+    tsx = (REPO / "frontend/web/components/Turnstile.tsx").read_text()
+
+    # opened when a challenge starts, closed on every terminal outcome
+    assert "setBusy(true)" in tsx
+    assert "setBusy(false)" in tsx
+    # and the class is driven by in-flight OR interactive, not interactive alone
+    assert "busy || interactive" in tsx
