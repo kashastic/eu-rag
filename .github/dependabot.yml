@@ -1,0 +1,22 @@
+# Weekly security and version updates for the web app, the API image and CI.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /frontend/web
+    schedule:
+      interval: weekly
+    groups:
+      next-and-react:
+        patterns: ["next", "react", "react-dom", "@types/react", "@types/react-dom"]
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directories: ["/", "/frontend/web"]
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
