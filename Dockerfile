@@ -1,5 +1,5 @@
 # EURAG self-host image. Multi-stage: build wheels once, ship a slim runtime.
-FROM python:3.11-slim AS build
+FROM python:3.15-slim AS build
 WORKDIR /app
 RUN pip install --no-cache-dir --upgrade pip build
 COPY pyproject.toml ./
@@ -10,7 +10,7 @@ COPY infra ./infra
 COPY frontend ./frontend
 RUN pip install --no-cache-dir --prefix=/install ".[prod]"
 
-FROM python:3.11-slim
+FROM python:3.15-slim
 # Security updates the base tag may not have picked up yet, and no
 # setuptools at runtime: nothing imports it, and its vendored packages
 # (jaraco.context) carry their own advisories.
