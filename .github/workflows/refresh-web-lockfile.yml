@@ -1,0 +1,37 @@
+# One-off: upgrade the web app's framework packages and regenerate the
+# lockfile on a machine with registry access. Removed again in the same PR.
+name: refresh-web-lockfile
+on:
+  push:
+    branches: [security/nextjs-15.5.29]
+    paths: [.github/workflows/refresh-web-lockfile.yml]
+permissions:
+  contents: write
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --save-exact next@15.5.29 react@19 react-dom@19
+      - run: npm install --save-exact --save-dev @types/react@19 @types/react-dom@19
+      - run: npm ls next react react-dom
+      - run: npm audit --omit=dev || true
+      - run: npm run build
+      - run: |
+          git config user.name "Akash Acharya"
+          git config user.email "44359944+kashastic@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "Web: upgrade Next.js to 15.5.29 and React to current 19.x
+
+          Next.js 15.1.6 with React 19.0.0 is affected by React2Shell
+          (CVE-2025-55182), an unauthenticated remote code execution flaw in
+          React Server Components that was exploited to install crypto miners,
+          plus the 2026 Next.js security releases. 15.5.29 is the latest
+          patched 15.x release (3 November 2026)."
+          git push
