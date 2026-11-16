@@ -22,6 +22,28 @@ them. Don't paste the same paragraph into three files — link.
 
 ## 2026-11-16 (The live server was taken over through the web app)
 
+### [DECISION] Dependabot proposes patches, minors and security fixes, not majors
+
+The first Dependabot run opened 8 PRs, all major jumps (Next 16, TypeScript 7,
+Node 26, Python 3.15, `@types/node` 26). CI was green on seven of them, which
+proved less than it looks: CI never builds the Docker images, so the Python and
+Node base-image bumps were not tested at all.
+
+`.github/dependabot.yml` now ignores `version-update:semver-major` for npm, pip
+and Docker, plus semver-minor for the `python` image (3.11 -> 3.15 counts as a
+minor, but a new CPython can lack wheels for onnxruntime / fastembed). Majors
+are upgraded by hand. GitHub Actions keep their majors: CI runs on them, so a
+bad bump fails its own PR.
+
+The trap this avoids: the ignore rule does **not** silence security fixes,
+because `update-types` filters version updates only. But security updates were
+**not on at all** until now. Version updates only offer newer releases; they
+never flag a vulnerable version, and they never touch an indirect dependency
+in the lockfile, which is exactly how React2Shell sat unnoticed. Dependency
+graph, Dependabot alerts and Dependabot security updates are now enabled in
+the repo settings. Those three live in Settings, not in the YAML: a fresh fork
+or a new repo starts with them off.
+
 ### [GOTCHA] An unpatched Next.js is a remote shell, and nothing on the host noticed
 
 Google suspended the GCP project on 2026-09-24 for **cryptocurrency mining**.

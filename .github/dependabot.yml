@@ -1,4 +1,17 @@
-# Weekly security and version updates for the web app, the API image and CI.
+# Weekly version updates for the web app, the API image and CI.
+#
+# Major versions are ignored for npm, pip and Docker: a major bump changes
+# behaviour, and CI never builds the Docker images, so a green check on a base
+# image bump proves nothing. Majors are upgraded by hand, on purpose.
+#
+# This does NOT block security fixes. `update-types` filters version updates
+# only; Dependabot security updates (enabled in the repo settings, alongside
+# Dependabot alerts) still open a PR for any vulnerable version, including
+# indirect dependencies pinned in the lockfile.
+#
+# GitHub Actions keep their majors: CI runs on those actions, so a bad bump
+# fails its own PR, and an old major stops working once GitHub retires the
+# Node runtime it was built on.
 version: 2
 updates:
   - package-ecosystem: npm
@@ -8,14 +21,27 @@ updates:
     groups:
       next-and-react:
         patterns: ["next", "react", "react-dom", "@types/react", "@types/react-dom"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: pip
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: docker
     directories: ["/", "/frontend/web"]
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # python:3.11 -> 3.15 counts as a minor bump, but a new CPython minor can
+      # lack wheels for onnxruntime / fastembed, and CI tests on 3.11 only.
+      - dependency-name: "python"
+        update-types: ["version-update:semver-minor"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
