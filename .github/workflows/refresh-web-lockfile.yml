@@ -18,20 +18,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: npm install --save-exact next@15.5.29 react@19 react-dom@19
-      - run: npm install --save-exact --save-dev @types/react@19 @types/react-dom@19
-      - run: npm ls next react react-dom
-      - run: npm audit --omit=dev || true
+      # Next.js 15.x pins postcss 8.4.31; lift it and two transitive
+      # packages to their patched releases within the same major version.
+      - run: |
+          npm pkg set 'overrides.postcss=>=8.5.23 <9'
+          npm pkg set 'overrides.nanoid=>=3.3.18 <4'
+          npm pkg set 'overrides.source-map-js=>=1.2.2 <2'
+          npm install
+      - run: npm ls next react react-dom postcss nanoid source-map-js
+      - run: npm audit --omit=dev --audit-level=moderate
       - run: npm run build
       - run: |
           git config user.name "Akash Acharya"
           git config user.email "44359944+kashastic@users.noreply.github.com"
           git add package.json package-lock.json
-          git commit -m "Web: upgrade Next.js to 15.5.29 and React to current 19.x
+          git commit -m "Web: override postcss, nanoid and source-map-js to patched releases
 
-          Next.js 15.1.6 with React 19.0.0 is affected by React2Shell
-          (CVE-2025-55182), an unauthenticated remote code execution flaw in
-          React Server Components that was exploited to install crypto miners,
-          plus the 2026 Next.js security releases. 15.5.29 is the latest
-          patched 15.x release (3 November 2026)."
+          Next.js 15.x pins postcss 8.4.31. npm audit's only suggestion was a
+          jump to Next.js 16; overrides keep the same major versions and leave
+          npm audit clean for production dependencies."
           git push
