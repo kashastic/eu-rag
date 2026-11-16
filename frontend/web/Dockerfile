@@ -7,6 +7,12 @@ COPY . .
 RUN npm run build
 
 FROM node:22-alpine
+# Security updates, and no package managers at runtime: the standalone
+# server needs only node, and npm/yarn bring their own dependency trees.
+RUN apk upgrade --no-cache && \
+    rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+      /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+      /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-*
 WORKDIR /app
 ENV NODE_ENV=production
 RUN addgroup -S app && adduser -S app -G app

@@ -11,6 +11,12 @@ COPY frontend ./frontend
 RUN pip install --no-cache-dir --prefix=/install ".[prod]"
 
 FROM python:3.11-slim
+# Security updates the base tag may not have picked up yet, and no
+# setuptools at runtime: nothing imports it, and its vendored packages
+# (jaraco.context) carry their own advisories.
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/* && \
+    pip uninstall -y setuptools
 # non-root runtime user
 RUN useradd --create-home --uid 10001 eurag
 WORKDIR /app
