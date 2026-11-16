@@ -20,6 +20,35 @@ them. Don't paste the same paragraph into three files — link.
 
 ---
 
+## 2026-11-16 (The live server was taken over through the web app)
+
+### [GOTCHA] An unpatched Next.js is a remote shell, and nothing on the host noticed
+
+Google suspended the GCP project on 2026-09-24 for **cryptocurrency mining**.
+The web app was still on **Next.js 15.1.6 / React 19.0.0**, inside the range
+of React2Shell (CVE-2025-55182, December 2025): unauthenticated remote code
+execution through React Server Components, widely used to drop miners. The
+lockfile had pinned that version since before the deploy and nothing flagged
+it. The web container held no secrets, but on the compose network it could
+reach Redis and Qdrant, which had no password.
+
+Fix: Next.js **15.5.29** (latest patched 15.x, 2026-11-03) and React
+**19.3.1**. Next.js 15.x pins `postcss` 8.4.31, so `postcss`, `nanoid` and
+`source-map-js` are lifted to patched releases with npm `overrides` (same
+major versions). `npm audit --omit=dev` is now clean and runs in CI as a
+failing step, and Dependabot opens weekly update PRs.
+
+### [DECISION] The public deployment moves to AKS, with containment
+
+The redeploy lives in
+[azure-agent-platform](https://github.com/kashastic/azure-agent-platform):
+the web pod has no outbound internet and no secrets, every pod sits behind a
+default-deny network policy, Postgres and Redis require passwords generated
+straight into Key Vault, and the gateway is the only public entry point. The
+GCP VM is treated as compromised: every secret that was on it was replaced.
+
+---
+
 ## 2026-08-11 (The solved Turnstile widget never gave its space back)
 
 ### [GOTCHA] "Interaction-only" hides the widget until it is used, not after

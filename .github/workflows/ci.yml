@@ -51,6 +51,12 @@ jobs:
       - name: Install
         run: npm ci
 
+      # Fails on any known advisory in what ships. The live server was taken
+      # over through an unpatched Next.js (React2Shell); this catches the
+      # next one before a deploy instead of after.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=moderate
+
       - name: Build
         run: npm run build
 
